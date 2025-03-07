@@ -118,3 +118,31 @@ fn test() {
         assert!(mash.is_sorted());
     }
 }
+
+#[cfg(test)]
+#[test]
+fn rc() {
+    use packed_seq::SeqVec;
+
+    for k in (0..10).map(|_| rand::random_range(1..100)) {
+        for n in (0..10).map(|_| rand::random_range(k..1000)) {
+            for h in (0..10).map(|_| rand::random_range(0..n - k + 1)) {
+                let seq = packed_seq::AsciiSeqVec::random(n);
+                let mash = crate::mash::<true, _>(seq.as_slice(), k, h);
+                assert_eq!(mash.len(), h);
+                assert!(mash.is_sorted());
+
+                let seq_rc = packed_seq::AsciiSeqVec::from_ascii(
+                    &seq.seq
+                        .iter()
+                        .rev()
+                        .map(|c| packed_seq::complement_char(*c))
+                        .collect::<Vec<_>>(),
+                );
+
+                let mash_rc = crate::mash::<true, _>(seq_rc.as_slice(), k, h);
+                assert_eq!(mash, mash_rc);
+            }
+        }
+    }
+}

@@ -9,10 +9,17 @@ categories = ["compression", "data-structures", "science::bioinformatics"]
 authors = ["Ragnar Groot Koerkamp"]
 description = "A SIMD-accelerated library to compute a bottom-h sketch"
 
+[profile.release]
+lto = "thin"
+incremental = true
+debug = true
+
 
 [dependencies]
 packed-seq = "1.0.2"
 simd-minimizers = "1.0.0"
 tracing = { version = "0.1.41", features = ["log"] }
-tracing-subscriber = { version = "0.3.18", features = ["env-filter"] }
 wide = "0.7.32"
+
+[dev-dependencies]
+rand = "0.9.0"
