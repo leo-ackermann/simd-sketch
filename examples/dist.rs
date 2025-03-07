@@ -7,6 +7,8 @@ use packed_seq::{PackedSeqVec, SeqVec};
 struct Args {
     p1: PathBuf,
     p2: PathBuf,
+    #[clap(short, long)]
+    bin: bool,
 }
 
 fn main() {
@@ -30,13 +32,22 @@ fn main() {
             seq.push_ascii(&record);
         }
         let start = std::time::Instant::now();
-        let mash = simd_mash::mash::<false, _>(seq.as_slice(), k, h);
+        let mash = if args.bin {
+            simd_mash::bin_mash::<false, _>(seq.as_slice(), k, h)
+        } else {
+            simd_mash::mash::<false, _>(seq.as_slice(), k, h)
+        };
+
         let elapsed = start.elapsed();
         tracing::info!("{h} hashes in {elapsed:?}");
         mash
     });
 
-    let overlap = simd_mash::set_intersection_size(&sketches[0], &sketches[1]);
+    let overlap = if args.bin {
+        simd_mash::bin_intersection(&sketches[0], &sketches[1])
+    } else {
+        simd_mash::set_intersection_size(&sketches[0], &sketches[1])
+    };
     tracing::info!("overlap = {}", overlap);
 }
 

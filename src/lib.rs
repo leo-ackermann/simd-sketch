@@ -60,29 +60,7 @@ pub fn mash<'s, const RC: bool, S: Seq<'s>>(seq: S, k: usize, h: usize) -> Vec<u
             "h {h} target {target} bound {bound}, expected count {}",
             h + h / 2
         );
-        let simd_bound = u32x8::splat(bound);
-
-        let (hashes_head, hashes_tail) =
-            simd_minimizers::private::nthash::nthash_seq_simd::<RC, S, NtHasher>(seq, k, 1);
-
-        out.clear();
-        out.resize(2 * h, 0);
-        let mut write_idx = 0;
-        for hashes in hashes_head {
-            let mask = hashes.cmp_lt(simd_bound);
-            if write_idx + 8 >= out.len() {
-                out.resize(write_idx * 3 / 2 + 8, 0);
-            }
-            unsafe { intrinsics::append_from_mask(hashes, mask, &mut out, &mut write_idx) };
-        }
-
-        out.resize(write_idx, 0);
-
-        for hash in hashes_tail {
-            if hash <= bound {
-                out.push(hash);
-            }
-        }
+        let write_idx = collect_up_to_bound::<RC, S>(seq, k, h, bound, &mut out);
 
         tracing::trace!("Got {}, needed {h}, expected {}", out.len(), h + h / 2);
 
@@ -95,6 +73,114 @@ pub fn mash<'s, const RC: bool, S: Seq<'s>>(seq: S, k: usize, h: usize) -> Vec<u
         }
         shift += 1;
         info!("Doing another iteration of mash because found only {write_idx} values with hash < {bound}, while h={h} are needed and {} were expected.", k+k/2);
+    }
+}
+
+/// For each remainder modulo h, return the smallest seen value.
+///
+/// Set `RC` to `true` for using canonical ntHash.
+pub fn bin_mash<'s, const RC: bool, S: Seq<'s>>(seq: S, k: usize, h: usize) -> Vec<u32> {
+    // Iterate all kmers and compute 32bit nthashes.
+    let n = seq.len();
+    let kmers = n - k + 1;
+    assert!(
+        kmers >= h,
+        "Sequence of length n={n} has {kmers} kmers, which is less than h={h}."
+    );
+
+    // 32-bit random hashes.
+    let mut shift = 0;
+    let mut out = vec![];
+    'l: loop {
+        let target = ((u32::MAX as usize / n * h) << shift).min(u32::MAX as usize) as u32;
+
+        // Should be fine. In practice 10% overlap is probably good enough.
+        let bound = target * h.ilog2() * 2;
+        tracing::trace!(
+            "h {h} target {target} bound {bound}, expected count {}",
+            h + h / 2
+        );
+        let write_idx = collect_up_to_bound::<RC, S>(seq, k, h, bound, &mut out);
+
+        tracing::trace!("Got {}, needed {h}, expected {}", out.len(), h + h / 2);
+
+        if out.len() >= h {
+            let m = FM32::new(h as u32);
+            let start = std::time::Instant::now();
+            let mut buckets = vec![u32::MAX; h];
+            for &hash in &out {
+                let bucket = m.reduce(hash);
+                buckets[bucket] = buckets[bucket].min(hash);
+            }
+            let mut empty = 0;
+            for &x in &buckets {
+                if x == u32::MAX {
+                    empty += 1;
+                }
+            }
+            if empty > 0 {
+                info!("Doing another iteration of mash because found {empty} empty buckets, while h={h} are needed and {} were expected.", k+k/2);
+                shift += 1;
+                continue 'l;
+            }
+            tracing::trace!("Sorting took {:?}", start.elapsed());
+            break buckets;
+        }
+        shift += 1;
+        info!("Doing another iteration of mash because found only {write_idx} values with hash < {bound}, while h={h} are needed and {} were expected.", k+k/2);
+    }
+}
+
+fn collect_up_to_bound<'s, const RC: bool, S: Seq<'s>>(
+    seq: S,
+    k: usize,
+    h: usize,
+    bound: u32,
+    out: &mut Vec<u32>,
+) -> usize {
+    let simd_bound = u32x8::splat(bound);
+
+    let (hashes_head, hashes_tail) =
+        simd_minimizers::private::nthash::nthash_seq_simd::<RC, S, NtHasher>(seq, k, 1);
+
+    out.clear();
+    out.resize(2 * h, 0);
+    let mut write_idx = 0;
+    for hashes in hashes_head {
+        let mask = hashes.cmp_lt(simd_bound);
+        if write_idx + 8 >= out.len() {
+            out.resize(write_idx * 3 / 2 + 8, 0);
+        }
+        unsafe { intrinsics::append_from_mask(hashes, mask, out, &mut write_idx) };
+    }
+
+    out.resize(write_idx, 0);
+
+    for hash in hashes_tail {
+        if hash <= bound {
+            out.push(hash);
+        }
+    }
+    write_idx
+}
+
+/// FastMod32, using the low 32 bits of the hash.
+/// Taken from https://github.com/lemire/fastmod/blob/master/include/fastmod.h
+#[derive(Copy, Clone, Debug)]
+pub struct FM32 {
+    d: u64,
+    m: u64,
+}
+impl FM32 {
+    fn new(d: u32) -> Self {
+        Self {
+            d: d as u64,
+            m: u64::MAX / d as u64 + 1,
+        }
+    }
+    fn reduce(self, h: u32) -> usize {
+        let lowbits = self.m * (h as u64);
+        ((lowbits as u128 * self.d as u128) >> 64) as usize
     }
 }
 
@@ -112,6 +198,12 @@ pub fn set_intersection_size(a: &[u32], b: &[u32]) -> usize {
         j += dj;
     }
     count
+}
+
+/// The number of common elements between two sorted lists.
+pub fn bin_intersection(a: &[u32], b: &[u32]) -> usize {
+    assert_eq!(a.len(), b.len());
+    std::iter::zip(a, b).map(|(a, b)| (a == b) as usize).sum()
 }
 
 #[cfg(test)]
