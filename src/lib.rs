@@ -98,6 +98,29 @@ pub fn mash<'s, const RC: bool, S: Seq<'s>>(seq: S, k: usize, h: usize) -> Vec<u
     }
 }
 
+/// The number of common elements between two sorted lists.
+pub fn set_intersection_size(a: &[u32], b: &[u32]) -> usize {
+    assert_eq!(a.len(), b.len());
+    let mut count = 0;
+    let mut i = 0;
+    let mut j = 0;
+    while i < a.len() && j < b.len() {
+        count += (a[i] == b[j]) as usize;
+        let di = (a[i] <= b[j]) as usize;
+        let dj = (a[i] >= b[j]) as usize;
+        i += di;
+        j += dj;
+    }
+    count
+}
+
+#[cfg(test)]
+#[test]
+fn test_overlap() {
+    let count = set_intersection_size(&[1, 2, 3, 5, 9, 10], &[1, 3, 5, 7, 9, 11]);
+    assert_eq!(count, 4);
+}
+
 #[cfg(test)]
 #[test]
 fn test() {
