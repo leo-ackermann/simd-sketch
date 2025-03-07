@@ -1,5 +1,14 @@
 //! # Compute a 32-bit bottom-h MASH.
 //!
+//! This library works by partitioning the input sequence into 8 chunks,
+//! and processing those in paralle using SIMD. This is based on the `packed-seq` and `simd-minimizers` crates.
+//!
+//! The largest hash should be around `target = u32::MAX * h / n`.
+//! To ensure a branch-free algorithm, we first collect all hashes up to `bound = 1.5 * target`.
+//! Then we sort the collected hashes, and return the bottom `h`.
+//!
+//! ### Example
+//!
 //! ```
 //! use packed_seq::SeqVec;
 //!
