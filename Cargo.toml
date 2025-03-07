@@ -1,0 +1,11 @@
+[package]
+name = "simd-mash"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+packed-seq = "1.0.2"
+simd-minimizers = "1.0.0"
+tracing = { version = "0.1.41", features = ["log"] }
+tracing-subscriber = { version = "0.3.18", features = ["env-filter"] }
+wide = "0.7.32"
