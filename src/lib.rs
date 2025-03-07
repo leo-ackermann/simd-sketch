@@ -55,33 +55,38 @@ pub fn mash<'s, const RC: bool, S: Seq<'s>>(seq: S, k: usize, h: usize) -> Vec<u
         let target = ((u32::MAX as usize / n * h) << shift).min(u32::MAX as usize) as u32;
 
         // Should be fine. In practice 10% overlap is probably good enough.
-        let bound = target + target / 2;
+        let bound = target.saturating_add(target / 2);
         tracing::trace!(
             "h {h} target {target} bound {bound}, expected count {}",
             h + h / 2
         );
         let simd_bound = u32x8::splat(bound);
 
-        let (hashes_head, _hashes_tail) =
+        let (hashes_head, hashes_tail) =
             simd_minimizers::private::nthash::nthash_seq_simd::<RC, S, NtHasher>(seq, k, 1);
 
         out.clear();
         out.resize(2 * h, 0);
         let mut write_idx = 0;
-        for (i, hashes) in hashes_head.enumerate() {
+        for hashes in hashes_head {
             let mask = hashes.cmp_lt(simd_bound);
-            assert!(
-                write_idx < out.len() - 8,
-                "i {i} n {n} Buffer len {} is not sufficient for write_idx {write_idx}",
-                out.len()
-            );
+            if write_idx + 8 >= out.len() {
+                out.resize(write_idx * 3 / 2 + 8, 0);
+            }
             unsafe { intrinsics::append_from_mask(hashes, mask, &mut out, &mut write_idx) };
         }
 
-        tracing::trace!("Got {}, needed {h}, expected {}", write_idx, h + h / 2);
+        out.resize(write_idx, 0);
 
-        if write_idx >= h {
-            out.resize(write_idx, 0);
+        for hash in hashes_tail {
+            if hash <= bound {
+                out.push(hash);
+            }
+        }
+
+        tracing::trace!("Got {}, needed {h}, expected {}", out.len(), h + h / 2);
+
+        if out.len() >= h {
             let start = std::time::Instant::now();
             out.sort_unstable();
             tracing::trace!("Sorting took {:?}", start.elapsed());
@@ -90,5 +95,26 @@ pub fn mash<'s, const RC: bool, S: Seq<'s>>(seq: S, k: usize, h: usize) -> Vec<u
         }
         shift += 1;
         info!("Doing another iteration of mash because found only {write_idx} values with hash < {bound}, while h={h} are needed and {} were expected.", k+k/2);
+    }
+}
+
+#[cfg(test)]
+#[test]
+fn test() {
+    use packed_seq::SeqVec;
+
+    let k = 31;
+    for n in 31..100 {
+        let h = n - k + 1;
+        let seq = packed_seq::PackedSeqVec::random(n);
+        let mash = crate::mash::<false, _>(seq.as_slice(), k, h);
+        assert_eq!(mash.len(), h);
+        assert!(mash.is_sorted());
+
+        let h = h.min(10);
+        let seq = packed_seq::PackedSeqVec::random(n);
+        let mash = crate::mash::<false, _>(seq.as_slice(), k, h);
+        assert_eq!(mash.len(), h);
+        assert!(mash.is_sorted());
     }
 }
