@@ -13,7 +13,8 @@ fn main() {
     let seq = PackedSeqVec::random(n);
 
     let start = std::time::Instant::now();
-    let mash = simd_mash::mash::<false, _>(seq.as_slice(), k, h);
+    let masher = simd_mash::Masher::new(k, h);
+    let mash = masher.bottom_mash(seq.as_slice());
     let elapsed = start.elapsed();
 
     tracing::info!("{h} hashes in {elapsed:?}");

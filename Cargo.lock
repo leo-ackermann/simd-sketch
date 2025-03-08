@@ -524,6 +524,7 @@ name = "simd-mash"
 version = "0.1.0"
 dependencies = [
  "clap",
+ "itertools",
  "needletail",
  "packed-seq",
  "rand",

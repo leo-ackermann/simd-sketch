@@ -1,25 +1,38 @@
 use std::path::PathBuf;
 
 use clap::Parser;
+use itertools::Itertools;
 use packed_seq::{PackedSeqVec, SeqVec};
+use tracing::{info, trace};
 
 #[derive(clap::Parser)]
 struct Args {
-    p1: PathBuf,
-    p2: PathBuf,
+    paths: Vec<PathBuf>,
     #[clap(short, long)]
     bin: bool,
+
+    #[clap(short, default_value_t = 31)]
+    k: usize,
+    #[clap(short, default_value_t = 10000)]
+    h: usize,
 }
 
 fn main() {
     init_trace();
 
     let args = Args::parse();
+    let s = args.paths.len();
 
-    let k = 31;
-    let h = 10_000;
+    let k = args.k;
+    let h = args.h;
 
-    let sketches = [args.p1, args.p2].map(|path| {
+    let masher = simd_mash::Masher::new(k, h);
+
+    let mut bottom_mashes = vec![];
+    let mut bin_mashes = vec![];
+    let start = std::time::Instant::now();
+    for path in args.paths {
+        trace!("Sketching {path:?}");
         let mut seq = PackedSeqVec::default();
         let mut reader = needletail::parse_fastx_file(path).unwrap();
         while let Some(r) = reader.next() {
@@ -32,23 +45,39 @@ fn main() {
             seq.push_ascii(&record);
         }
         let start = std::time::Instant::now();
-        let mash = if args.bin {
-            simd_mash::bin_mash::<false, _>(seq.as_slice(), k, h)
+        if args.bin {
+            bin_mashes.push(masher.bin_mash(seq.as_slice()));
         } else {
-            simd_mash::mash::<false, _>(seq.as_slice(), k, h)
+            bottom_mashes.push(masher.bottom_mash(seq.as_slice()));
         };
+        eprintln!("sketching took {:?}", start.elapsed());
+    }
+    let t = start.elapsed();
+    info!("Sketching {s} seqs took {t:?} ({:?} avg)", t / s as u32);
 
-        let elapsed = start.elapsed();
-        tracing::info!("{h} hashes in {elapsed:?}");
-        mash
-    });
-
-    let overlap = if args.bin {
-        simd_mash::bin_intersection(&sketches[0], &sketches[1])
+    let start = std::time::Instant::now();
+    let dists = if args.bin {
+        bin_mashes
+            .iter()
+            .tuple_combinations()
+            .map(|(s1, s2)| s1.similarity(s2))
+            .collect_vec()
     } else {
-        simd_mash::set_intersection_size(&sketches[0], &sketches[1])
+        bottom_mashes
+            .iter()
+            .tuple_combinations()
+            .map(|(s1, s2)| s1.similarity(s2))
+            .collect_vec()
     };
-    tracing::info!("overlap = {}", overlap);
+    let t = start.elapsed();
+    let cnt = s * (s - 1) / 2;
+    info!(
+        "Computing {cnt} dists took {t:?} ({:?} avg)",
+        t / cnt.max(1) as u32
+    );
+    for dist in dists {
+        println!("{dist}");
+    }
 }
 
 fn init_trace() {
