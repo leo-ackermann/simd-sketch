@@ -50,7 +50,7 @@ fn main() {
         } else {
             bottom_mashes.push(masher.bottom_mash(seq.as_slice()));
         };
-        eprintln!("sketching took {:?}", start.elapsed());
+        trace!("sketching itself took {:?}", start.elapsed());
     }
     let t = start.elapsed();
     info!("Sketching {s} seqs took {t:?} ({:?} avg)", t / s as u32);

@@ -111,7 +111,7 @@ use std::sync::atomic::{AtomicUsize, Ordering::SeqCst};
 
 use packed_seq::{u32x8, Seq};
 use simd_minimizers::private::nthash::NtHasher;
-use tracing::info;
+use tracing::debug;
 
 /// A sketch containing the `h` smallest k-mer hashes.
 pub struct BottomMash {
@@ -227,7 +227,7 @@ impl<const RC: bool> Masher<RC> {
             }
             self.factor
                 .fetch_add((self.factor.load(SeqCst) + 1) / 2, SeqCst);
-            info!("Increase factor to {}", self.factor.load(SeqCst));
+            debug!("Increase factor to {}", self.factor.load(SeqCst));
         }
     }
 
@@ -268,7 +268,7 @@ impl<const RC: bool> Masher<RC> {
             }
             self.factor
                 .fetch_add((self.factor.load(SeqCst) + 1) / 2, SeqCst);
-            info!("Increase factor to {}", self.factor.load(SeqCst));
+            debug!("Increase factor to {}", self.factor.load(SeqCst));
         }
     }
 }
