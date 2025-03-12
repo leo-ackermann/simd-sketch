@@ -1,8 +1,8 @@
 //! # SimdMash
 //!
 //! This library provides two types of sequence sketches:
-//! - the classic bottom-`h` sketch;
-//! - the newer binned sketch, returning the smallest hash in each bin.
+//! - the classic bottom-`s` mash;
+//! - the newer bin-mash, returning the smallest hash in each of `s` bins.
 //!
 //! ## Hash function
 //! All internal hashes are 32 bits. Either a forward-only hash or
@@ -15,9 +15,9 @@
 //! For classic bottom-mash, evaluating the similarity is slow because a
 //! merge-sort must be done between the two lists.
 //!
-//! BinMash solves this by partitioning the hashes into `h` partitions.
-//! Previous methods partition into ranges of size `u32::MAX/h`, but here we
-//! partition by remainder mod `h` instead.
+//! BinMash solves this by partitioning the hashes into `s` partitions.
+//! Previous methods partition into ranges of size `u32::MAX/s`, but here we
+//! partition by remainder mod `s` instead.
 //!
 //! We find the smallest hash for each remainder as the sketch.
 //! To compute the similarity, we can simply use the hamming distance between
@@ -26,34 +26,36 @@
 //! The bin-mash similarity has a very strong one-to-one correlation with the classic bottom-mash.
 //!
 //! ## Jaccard similarity
-//! For the bottom mash, we conceptually estimate similarity as follows:
-//! 1. Find the smallest `h` distinct k-mer hashes in the union of two sketches.
+//! For the bottom-mash, we conceptually estimate similarity as follows:
+//! 1. Find the smallest `s` distinct k-mer hashes in the union of two sketches.
 //! 2. Return the fraction of these k-mers that occurs in both sketches.
 //!
-//! For the binned mash, we simply return the fraction of partitions that have
+//! For the bin-mash, we simply return the fraction of partitions that have
 //! the same k-mer for both sequences.
 //!
 //! ## Usage
 //!
 //! The main entrypoint of this library is the [`Masher`] object.
-//! Construct it in either the forward or canonical variant, and give `k` and `h`.
+//! Construct it in either the forward or canonical variant, and give `k` and `s`.
 //! Then call either [`Masher::bottom_mash`] or [`Masher::bin_mash`] on it, and use the
 //! `similarity` functions on the returned [`BottomMash`] and [`BinMash`] objects.
 //!
 //! ```
 //! use packed_seq::SeqVec;
 //!
-//! // Bottom h=10000 sketch of k=31-mers.
+//! // Bottom s=10000 sketch of k=31-mers.
 //! let k = 31;
-//! let h = 10_000;
+//! let s = 10_000;
 //!
 //! // Use `new_rc` for a canonical version instead.
-//! let masher = simd_mash::Masher::new(k, h);
+//! let masher = simd_mash::Masher::new(k, s);
 //!
 //! // Generate two random sequences of 2M characters.
 //! let n = 2_000_000;
 //! let seq1 = packed_seq::PackedSeqVec::random(n);
 //! let seq2 = packed_seq::PackedSeqVec::random(n);
+//!
+//! // Bottom-mash variant
 //!
 //! let mash1: simd_mash::BottomMash = masher.bottom_mash(seq1.as_slice());
 //! let mash2: simd_mash::BottomMash = masher.bottom_mash(seq2.as_slice());
@@ -61,7 +63,7 @@
 //! // Value between 0 and 1, estimating the fraction of shared k-mers.
 //! let similarity = mash1.similarity(&mash2);
 //!
-//! // BinMash variant
+//! // Bin-mash variant
 //!
 //! let mash1: simd_mash::BinMash = masher.bin_mash(seq1.as_slice());
 //! let mash2: simd_mash::BinMash = masher.bin_mash(seq2.as_slice());
@@ -76,18 +78,18 @@
 //! and processing those in parallel using SIMD.
 //! This is based on the [`packed-seq`](../packed_seq/index.html) and [`simd-minimizers`](../simd_minimizers/index.html) crates.
 //!
-//! For bottom-mash, the largest hash should be around `target = u32::MAX * h / n` (ignoring duplicates).
+//! For bottom-mash, the largest hash should be around `target = u32::MAX * s / n` (ignoring duplicates).
 //! To ensure a branch-free algorithm, we first collect all hashes up to `bound = 1.5 * target`.
-//! Then we sort the collected hashes. If there are at least `h` left after deduplicating, we return the bottom `h`.
+//! Then we sort the collected hashes. If there are at least `s` left after deduplicating, we return the bottom `s`.
 //! Otherwise, we double the `1.5` multiplication factor and retry. This
 //! factor is cached to make the sketching of multiple genomes more efficient.
 //!
 //! For bin-mash, we use the same approach, and increase the factor until we find a k-mer hash in every bucket.
-//! In expectation, this needs to collect a fraction around `log(n) * h / n` of hashes, rather than `h / n`.
+//! In expectation, this needs to collect a fraction around `log(n) * s / n` of hashes, rather than `s / n`.
 //! In practice this doesn't matter much, as the hashing of all input k-mers is the bottleneck,
 //! and the sorting of the small sample of k-mers is relatively fast.
 //!
-//! For bin-mash we assign each element to its bucket via its remainder modulo `h`.
+//! For bin-mash we assign each element to its bucket via its remainder modulo `s`.
 //! We compute this efficiently using [fast-mod](https://github.com/lemire/fastmod/blob/master/include/fastmod.h).
 //!
 //! ## Performance
@@ -101,9 +103,11 @@
 //!
 //! Comparing sketches is relatively fast, but can become a bottleneck when there are many input sequences,
 //! since the number of comparisons grows quadratically. In this case, prefer bin-mash.
-//! As an example, when sketching 5MB bacterial genomes using `h=10000`, each sketch takes 4ms.
+//! As an example, when sketching 5MB bacterial genomes using `s=10000`, each sketch takes 4ms.
 //! Comparing two sketches takes 1.6us.
 //! This starts to be the dominant factor when the number of input sequences is more than 5000.
+//!
+//! TODO: Document `b`.
 
 mod intrinsics;
 
@@ -113,11 +117,29 @@ use packed_seq::{u32x8, Seq};
 use simd_minimizers::private::nthash::NtHasher;
 use tracing::debug;
 
-/// A sketch containing the `h` smallest k-mer hashes.
+enum BitSketch {
+    B32(Vec<u32>),
+    B16(Vec<u16>),
+    B8(Vec<u8>),
+}
+
+impl BitSketch {
+    fn new(b: usize, vals: Vec<u32>) -> Self {
+        match b {
+            32 => BitSketch::B32(vals),
+            16 => BitSketch::B16(vals.into_iter().map(|x| x as u16).collect()),
+            8 => BitSketch::B8(vals.into_iter().map(|x| x as u8).collect()),
+            _ => panic!("Unsupported bit width. Must be 8 or 16 or 32."),
+        }
+    }
+}
+
+/// A sketch containing the `s` smallest k-mer hashes.
 pub struct BottomMash {
     rc: bool,
     k: usize,
-    bottom: Vec<u32>,
+    b: usize,
+    bottom: BitSketch,
 }
 
 impl BottomMash {
@@ -125,8 +147,16 @@ impl BottomMash {
     pub fn similarity(&self, other: &Self) -> f32 {
         assert_eq!(self.rc, other.rc);
         assert_eq!(self.k, other.k);
-        let a = &self.bottom;
-        let b = &other.bottom;
+        assert_eq!(self.b, other.b);
+        match (&self.bottom, &other.bottom) {
+            (BitSketch::B32(a), BitSketch::B32(b)) => Self::inner_similarity(a, b),
+            (BitSketch::B16(a), BitSketch::B16(b)) => Self::inner_similarity(a, b),
+            (BitSketch::B8(a), BitSketch::B8(b)) => Self::inner_similarity(a, b),
+            _ => panic!("Bit width mismatch"),
+        }
+    }
+
+    fn inner_similarity<T: Eq + Ord>(a: &Vec<T>, b: &Vec<T>) -> f32 {
         assert_eq!(a.len(), b.len());
         let mut intersection_size = 0;
         let mut union_size = 0;
@@ -141,15 +171,16 @@ impl BottomMash {
             union_size += 1;
         }
 
-        return intersection_size as f32 / self.bottom.len() as f32;
+        return intersection_size as f32 / a.len() as f32;
     }
 }
 
-/// A sketch containing the smallest k-mer hash for each remainder mod `h`.
+/// A sketch containing the smallest k-mer hash for each remainder mod `s`.
 pub struct BinMash {
     rc: bool,
     k: usize,
-    bins: Vec<u32>,
+    b: usize,
+    bins: BitSketch,
 }
 
 impl BinMash {
@@ -157,8 +188,15 @@ impl BinMash {
     pub fn similarity(&self, other: &Self) -> f32 {
         assert_eq!(self.rc, other.rc);
         assert_eq!(self.k, other.k);
-        let a = &self.bins;
-        let b = &other.bins;
+        assert_eq!(self.b, other.b);
+        match (&self.bins, &other.bins) {
+            (BitSketch::B32(a), BitSketch::B32(b)) => Self::inner_similarity(a, b),
+            (BitSketch::B16(a), BitSketch::B16(b)) => Self::inner_similarity(a, b),
+            (BitSketch::B8(a), BitSketch::B8(b)) => Self::inner_similarity(a, b),
+            _ => panic!("Bit width mismatch"),
+        }
+    }
+    fn inner_similarity<T: Eq>(a: &Vec<T>, b: &Vec<T>) -> f32 {
         assert_eq!(a.len(), b.len());
         std::iter::zip(a, b)
             .map(|(a, b)| (a == b) as u32)
@@ -172,17 +210,19 @@ impl BinMash {
 /// Contains internal state to optimize the implementation when sketching multiple similar sequences.
 pub struct Masher<const RC: bool> {
     k: usize,
-    h: usize,
+    s: usize,
+    b: usize,
 
     factor: AtomicUsize,
 }
 
 impl Masher<false> {
     /// Construct a new forward-only `Masher` object.
-    pub fn new(k: usize, h: usize) -> Self {
+    pub fn new(k: usize, s: usize, b: usize) -> Self {
         Masher::<false> {
             k,
-            h,
+            s,
+            b,
             factor: 2.into(),
         }
     }
@@ -190,38 +230,40 @@ impl Masher<false> {
 
 impl Masher<true> {
     /// Construct a new reverse-complement-aware `Masher` object.
-    pub fn new_rc(k: usize, h: usize) -> Self {
+    pub fn new_rc(k: usize, s: usize, b: usize) -> Self {
         Masher::<true> {
             k,
-            h,
+            s,
+            b,
             factor: 2.into(),
         }
     }
 }
 
 impl<const RC: bool> Masher<RC> {
-    /// Return the `h` smallest `u32` k-mer hashes.
+    /// Return the `s` smallest `u32` k-mer hashes.
     pub fn bottom_mash<'s, S: Seq<'s>>(&self, seq: S) -> BottomMash {
         // Iterate all kmers and compute 32bit nthashes.
         let n = seq.len();
         let mut out = vec![];
         loop {
-            let target = u32::MAX as usize / n * self.h;
+            let target = u32::MAX as usize / n * self.s;
             let bound =
                 (target.saturating_mul(self.factor.load(SeqCst))).min(u32::MAX as usize) as u32;
 
             collect_up_to_bound::<RC, S>(seq, self.k, bound, &mut out);
 
-            if bound == u32::MAX || out.len() >= self.h {
+            if bound == u32::MAX || out.len() >= self.s {
                 out.sort_unstable();
                 out.dedup();
-                if bound == u32::MAX || out.len() >= self.h {
-                    out.resize(self.h, u32::MAX);
+                if bound == u32::MAX || out.len() >= self.s {
+                    out.resize(self.s, u32::MAX);
 
                     break BottomMash {
                         rc: RC,
                         k: self.k,
-                        bottom: out,
+                        b: self.b,
+                        bottom: BitSketch::new(self.b, out),
                     };
                 }
             }
@@ -231,25 +273,25 @@ impl<const RC: bool> Masher<RC> {
         }
     }
 
-    /// Split the hashes into `h` buckets and return the smallest hash in each bucket.
+    /// Split the hashes into `s` buckets and return the smallest hash in each bucket.
     ///
-    /// Buckets are determined via the remainder mod `h`.
+    /// Buckets are determined via the remainder mod `s`.
     pub fn bin_mash<'s, S: Seq<'s>>(&self, seq: S) -> BinMash {
         // Iterate all kmers and compute 32bit nthashes.
         let n = seq.len();
         let mut out = vec![];
-        let mut bins = vec![u32::MAX; self.h];
+        let mut bins = vec![u32::MAX; self.s];
         loop {
-            let target = u32::MAX as usize / n * self.h;
+            let target = u32::MAX as usize / n * self.s;
             let bound =
                 (target.saturating_mul(self.factor.load(SeqCst))).min(u32::MAX as usize) as u32;
 
             collect_up_to_bound::<RC, S>(seq, self.k, bound, &mut out);
 
-            if bound == u32::MAX || out.len() >= self.h {
-                let m = FM32::new(self.h as u32);
+            if bound == u32::MAX || out.len() >= self.s {
+                let m = FM32::new(self.s as u32);
                 for &hash in &out {
-                    let bin = m.reduce(hash);
+                    let bin = m.fastmod(hash);
                     bins[bin] = bins[bin].min(hash);
                 }
                 let mut empty = 0;
@@ -262,7 +304,11 @@ impl<const RC: bool> Masher<RC> {
                     break BinMash {
                         rc: RC,
                         k: self.k,
-                        bins,
+                        b: self.b,
+                        bins: BitSketch::new(
+                            self.b,
+                            bins.into_iter().map(|x| m.fastdiv(x) as u32).collect(),
+                        ),
                     };
                 }
             }
@@ -317,9 +363,12 @@ impl FM32 {
             m: u64::MAX / d as u64 + 1,
         }
     }
-    fn reduce(self, h: u32) -> usize {
+    fn fastmod(self, h: u32) -> usize {
         let lowbits = self.m.wrapping_mul(h as u64);
         ((lowbits as u128 * self.d as u128) >> 64) as usize
+    }
+    fn fastdiv(self, h: u32) -> usize {
+        ((self.m as u128 * h as u128) >> 64) as u32 as usize
     }
 }
 
@@ -327,22 +376,29 @@ impl FM32 {
 #[test]
 fn test() {
     use packed_seq::SeqVec;
+    let b = 16;
 
     let k = 31;
     for n in 31..100 {
-        let h = n - k + 1;
+        let s = n - k + 1;
         let seq = packed_seq::PackedSeqVec::random(n);
-        let masher = crate::Masher::new(k, h);
+        let masher = crate::Masher::new(k, s, b);
         let mash = masher.bottom_mash(seq.as_slice());
-        assert_eq!(mash.bottom.len(), h);
-        assert!(mash.bottom.is_sorted());
+        let BitSketch::B16(bottom) = mash.bottom else {
+            panic!()
+        };
+        assert_eq!(bottom.len(), s);
+        assert!(bottom.is_sorted());
 
-        let h = h.min(10);
+        let s = s.min(10);
         let seq = packed_seq::PackedSeqVec::random(n);
-        let masher = crate::Masher::new(k, h);
+        let masher = crate::Masher::new(k, s, b);
         let mash = masher.bottom_mash(seq.as_slice());
-        assert_eq!(mash.bottom.len(), h);
-        assert!(mash.bottom.is_sorted());
+        let BitSketch::B16(bottom) = mash.bottom else {
+            panic!()
+        };
+        assert_eq!(bottom.len(), s);
+        assert!(bottom.is_sorted());
     }
 }
 
@@ -351,14 +407,18 @@ fn test() {
 fn rc() {
     use packed_seq::SeqVec;
 
+    let b = 32;
     for k in (0..10).map(|_| rand::random_range(1..100)) {
         for n in (0..10).map(|_| rand::random_range(k..1000)) {
-            for h in (0..10).map(|_| rand::random_range(0..n - k + 1)) {
+            for s in (0..10).map(|_| rand::random_range(0..n - k + 1)) {
                 let seq = packed_seq::AsciiSeqVec::random(n);
-                let masher = crate::Masher::new_rc(k, h);
+                let masher = crate::Masher::new_rc(k, s, b);
                 let mash = masher.bottom_mash(seq.as_slice());
-                assert_eq!(mash.bottom.len(), h);
-                assert!(mash.bottom.is_sorted());
+                let BitSketch::B32(bottom) = mash.bottom else {
+                    panic!()
+                };
+                assert_eq!(bottom.len(), s);
+                assert!(bottom.is_sorted());
 
                 let seq_rc = packed_seq::AsciiSeqVec::from_ascii(
                     &seq.seq
@@ -369,7 +429,10 @@ fn rc() {
                 );
 
                 let mash_rc = masher.bottom_mash(seq_rc.as_slice());
-                assert_eq!(mash.bottom, mash_rc.bottom);
+                let BitSketch::B32(bottom_rc) = mash_rc.bottom else {
+                    panic!()
+                };
+                assert_eq!(bottom, bottom_rc);
             }
         }
     }
