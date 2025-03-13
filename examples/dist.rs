@@ -3,9 +3,10 @@ use std::path::PathBuf;
 use clap::Parser;
 use itertools::Itertools;
 use packed_seq::{AsciiSeqVec, SeqVec};
+use std::io::Write;
 use tracing::{info, trace};
 
-#[derive(clap::Parser, Debug)]
+#[derive(clap::Parser, Debug, Clone)]
 struct Args {
     paths: Vec<PathBuf>,
     #[clap(long)]
@@ -19,15 +20,18 @@ struct Args {
     #[clap(short, default_value_t = 10000)]
     s: usize,
     /// Store bottom-b bits of each element. Must be multiple of 8.
-    #[clap(short, default_value_t = 16)]
+    #[clap(short, default_value_t = 32)]
     b: usize,
+
+    #[clap(long)]
+    stats: Option<PathBuf>,
 }
 
 fn main() {
     init_trace();
 
     let args = Args::parse();
-    let paths = collect_paths(args.paths);
+    let paths = collect_paths(&args.paths);
     let q = paths.len();
 
     let k = args.k;
@@ -65,8 +69,11 @@ fn main() {
         };
         trace!("sketching itself took {:?}", start.elapsed());
     }
-    let t = start.elapsed();
-    info!("Sketching {q} seqs took {t:?} ({:?} avg)", t / q as u32);
+    let t_sketch = start.elapsed();
+    info!(
+        "Sketching {q} seqs took {t_sketch:?} ({:?} avg)",
+        t_sketch / q as u32
+    );
 
     let start = std::time::Instant::now();
     let dists = if args.bin {
@@ -82,19 +89,37 @@ fn main() {
             .map(|(s1, s2)| s1.similarity(s2))
             .collect_vec()
     };
-    let t = start.elapsed();
+    let t_dist = start.elapsed();
     let cnt = q * (q - 1) / 2;
     info!(
-        "Computing {cnt} dists took {t:?} ({:?} avg)",
-        t / cnt.max(1) as u32
+        "Computing {cnt} dists took {t_dist:?} ({:?} avg)",
+        t_dist / cnt.max(1) as u32
     );
     info!(
         "Params {:?}",
         Args {
             paths: vec![],
-            ..args
+            ..args.clone()
         }
     );
+
+    if let Some(stats) = &args.stats {
+        let mut writer = std::fs::File::options()
+            .create(true)
+            .append(true)
+            .write(true)
+            .open(stats)
+            .unwrap();
+        writeln!(
+            writer,
+            "SimdMash {} {q} {k} {s} {b} {} {}",
+            if args.bin { "bin" } else { "bottom" },
+            t_sketch.as_secs_f32(),
+            t_dist.as_secs_f32()
+        )
+        .unwrap();
+    }
+
     for dist in dists {
         println!("{dist}");
     }
@@ -114,13 +139,13 @@ fn init_trace() {
         .init();
 }
 
-fn collect_paths(paths: Vec<PathBuf>) -> Vec<PathBuf> {
+fn collect_paths(paths: &Vec<PathBuf>) -> Vec<PathBuf> {
     let mut res = vec![];
     for path in paths {
         if path.is_dir() {
             res.extend(path.read_dir().unwrap().map(|entry| entry.unwrap().path()));
         } else {
-            res.push(path);
+            res.push(path.clone());
         }
     }
     res
