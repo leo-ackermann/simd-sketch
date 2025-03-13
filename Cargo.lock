@@ -520,7 +520,18 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0fda2ff0d084019ba4d7c6f371c95d8fd75ce3524c3cb8fb653a3023f6323e64"
 
 [[package]]
-name = "simd-mash"
+name = "simd-minimizers"
+version = "1.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a21e3b5b1be74f7081349fa58f0370528543570896cb89fbf5e3a34f8434a65e"
+dependencies = [
+ "itertools",
+ "packed-seq",
+ "wide",
+]
+
+[[package]]
+name = "simd-sketch"
 version = "0.1.0"
 dependencies = [
  "clap",
@@ -531,17 +542,6 @@ dependencies = [
  "simd-minimizers",
  "tracing",
  "tracing-subscriber",
- "wide",
-]
-
-[[package]]
-name = "simd-minimizers"
-version = "1.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a21e3b5b1be74f7081349fa58f0370528543570896cb89fbf5e3a34f8434a65e"
-dependencies = [
- "itertools",
- "packed-seq",
  "wide",
 ]
 

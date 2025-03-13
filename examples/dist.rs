@@ -10,7 +10,7 @@ use tracing::{info, trace};
 struct Args {
     paths: Vec<PathBuf>,
     #[clap(long)]
-    bin: bool,
+    bucket: bool,
 
     /// k-mer length
     #[clap(short, default_value_t = 31)]
@@ -38,10 +38,10 @@ fn main() {
     let s = args.s;
     let b = args.b;
 
-    let masher = simd_mash::Masher::new_rc(k, s, b);
+    let sketcher = simd_sketch::Sketcher::new_rc(k, s, b);
 
-    let mut bottom_mashes = vec![];
-    let mut bin_mashes = vec![];
+    let mut bottom_sketches = vec![];
+    let mut bucket_sketches = vec![];
     let start = std::time::Instant::now();
 
     for path in paths {
@@ -62,10 +62,10 @@ fn main() {
         }
         trace!("Reading & filtering took {:?}", start.elapsed());
         let start = std::time::Instant::now();
-        if args.bin {
-            bin_mashes.push(masher.bin_mash(seq.as_slice()));
+        if args.bucket {
+            bucket_sketches.push(sketcher.bucket_sketch(seq.as_slice()));
         } else {
-            bottom_mashes.push(masher.bottom_mash(seq.as_slice()));
+            bottom_sketches.push(sketcher.bottom_sketch(seq.as_slice()));
         };
         trace!("sketching itself took {:?}", start.elapsed());
     }
@@ -76,14 +76,14 @@ fn main() {
     );
 
     let start = std::time::Instant::now();
-    let dists = if args.bin {
-        bin_mashes
+    let dists = if args.bucket {
+        bucket_sketches
             .iter()
             .tuple_combinations()
             .map(|(s1, s2)| s1.similarity(s2))
             .collect_vec()
     } else {
-        bottom_mashes
+        bottom_sketches
             .iter()
             .tuple_combinations()
             .map(|(s1, s2)| s1.similarity(s2))
@@ -112,8 +112,8 @@ fn main() {
             .unwrap();
         writeln!(
             writer,
-            "SimdMash {} {q} {k} {s} {b} {} {}",
-            if args.bin { "bin" } else { "bottom" },
+            "SimdSketch {} {q} {k} {s} {b} {} {}",
+            if args.bucket { "bucket" } else { "bottom" },
             t_sketch.as_secs_f32(),
             t_dist.as_secs_f32()
         )
@@ -148,5 +148,6 @@ fn collect_paths(paths: &Vec<PathBuf>) -> Vec<PathBuf> {
             res.push(path.clone());
         }
     }
+    res.sort();
     res
 }

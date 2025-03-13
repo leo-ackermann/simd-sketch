@@ -1,8 +1,8 @@
-//! # SimdMash
+//! # SimdSketch
 //!
 //! This library provides two types of sequence sketches:
-//! - the classic bottom-`s` mash;
-//! - the newer bin-mash, returning the smallest hash in each of `s` bins.
+//! - the classic bottom-`s` sketch;
+//! - the newer bucket-sketch, returning the smallest hash in each of `s` buckets.
 //!
 //! ## Hash function
 //! All internal hashes are 32 bits. Either a forward-only hash or
@@ -11,11 +11,11 @@
 //! *TODO:* Current we use (canonical) ntHash. This causes some hash-collisions
 //! for `k <= 16`, [which can be avoided](https://curiouscoding.nl/posts/nthash/#is-nthash-injective-on-kmers).
 //!
-//! ## BinMash
-//! For classic bottom-mash, evaluating the similarity is slow because a
+//! ## BucketSketch
+//! For classic bottom-sketch, evaluating the similarity is slow because a
 //! merge-sort must be done between the two lists.
 //!
-//! BinMash solves this by partitioning the hashes into `s` partitions.
+//! The bucket sketch solves this by partitioning the hashes into `s` partitions.
 //! Previous methods partition into ranges of size `u32::MAX/s`, but here we
 //! partition by remainder mod `s` instead.
 //!
@@ -23,22 +23,22 @@
 //! To compute the similarity, we can simply use the hamming distance between
 //! two sketches, which is significantly faster.
 //!
-//! The bin-mash similarity has a very strong one-to-one correlation with the classic bottom-mash.
+//! The bucket sketch similarity has a very strong one-to-one correlation with the classic bottom-sketch.
 //!
 //! ## Jaccard similarity
-//! For the bottom-mash, we conceptually estimate similarity as follows:
+//! For the bottom sketch, we conceptually estimate similarity as follows:
 //! 1. Find the smallest `s` distinct k-mer hashes in the union of two sketches.
 //! 2. Return the fraction of these k-mers that occurs in both sketches.
 //!
-//! For the bin-mash, we simply return the fraction of partitions that have
+//! For the bucket sketch, we simply return the fraction of partitions that have
 //! the same k-mer for both sequences.
 //!
 //! ## Usage
 //!
-//! The main entrypoint of this library is the [`Masher`] object.
+//! The main entrypoint of this library is the [`Sketcher`] object.
 //! Construct it in either the forward or canonical variant, and give `k` and `s`.
-//! Then call either [`Masher::bottom_mash`] or [`Masher::bin_mash`] on it, and use the
-//! `similarity` functions on the returned [`BottomMash`] and [`BinMash`] objects.
+//! Then call either [`Sketcher::bottom_sketch`] or [`Sketcher::bucket_sketch`] on it, and use the
+//! `similarity` functions on the returned [`BottomSketch`] and [`BucketSketch`] objects.
 //!
 //! ```
 //! use packed_seq::SeqVec;
@@ -48,28 +48,28 @@
 //! let s = 10_000;
 //!
 //! // Use `new_rc` for a canonical version instead.
-//! let masher = simd_mash::Masher::new(k, s);
+//! let sketcher = simd_sketch::Sketcher::new(k, s);
 //!
 //! // Generate two random sequences of 2M characters.
 //! let n = 2_000_000;
 //! let seq1 = packed_seq::PackedSeqVec::random(n);
 //! let seq2 = packed_seq::PackedSeqVec::random(n);
 //!
-//! // Bottom-mash variant
+//! // Bottom-sketch variant
 //!
-//! let mash1: simd_mash::BottomMash = masher.bottom_mash(seq1.as_slice());
-//! let mash2: simd_mash::BottomMash = masher.bottom_mash(seq2.as_slice());
-//!
-//! // Value between 0 and 1, estimating the fraction of shared k-mers.
-//! let similarity = mash1.similarity(&mash2);
-//!
-//! // Bin-mash variant
-//!
-//! let mash1: simd_mash::BinMash = masher.bin_mash(seq1.as_slice());
-//! let mash2: simd_mash::BinMash = masher.bin_mash(seq2.as_slice());
+//! let sketch1: simd_sketch::BottomSketch = sketcher.bottom_sketch(seq1.as_slice());
+//! let sketch2: simd_sketch::BottomSketch = sketcher.bottom_sketch(seq2.as_slice());
 //!
 //! // Value between 0 and 1, estimating the fraction of shared k-mers.
-//! let similarity = mash1.similarity(&mash2);
+//! let similarity = sketch1.similarity(&sketch2);
+//!
+//! // Bucket sketch variant
+//!
+//! let sketch1: simd_sketch::BucketSketch = sketcher.bucket_sketch(seq1.as_slice());
+//! let sketch2: simd_sketch::BucketSketch = sketcher.bucket_sketch(seq2.as_slice());
+//!
+//! // Value between 0 and 1, estimating the fraction of shared k-mers.
+//! let similarity = sketch1.similarity(&sketch2);
 //! ```
 //!
 //! ## Implementation notes
@@ -78,18 +78,18 @@
 //! and processing those in parallel using SIMD.
 //! This is based on the [`packed-seq`](../packed_seq/index.html) and [`simd-minimizers`](../simd_minimizers/index.html) crates.
 //!
-//! For bottom-mash, the largest hash should be around `target = u32::MAX * s / n` (ignoring duplicates).
+//! For bottom sketch, the largest hash should be around `target = u32::MAX * s / n` (ignoring duplicates).
 //! To ensure a branch-free algorithm, we first collect all hashes up to `bound = 1.5 * target`.
 //! Then we sort the collected hashes. If there are at least `s` left after deduplicating, we return the bottom `s`.
 //! Otherwise, we double the `1.5` multiplication factor and retry. This
 //! factor is cached to make the sketching of multiple genomes more efficient.
 //!
-//! For bin-mash, we use the same approach, and increase the factor until we find a k-mer hash in every bucket.
+//! For bucket sketch, we use the same approach, and increase the factor until we find a k-mer hash in every bucket.
 //! In expectation, this needs to collect a fraction around `log(n) * s / n` of hashes, rather than `s / n`.
 //! In practice this doesn't matter much, as the hashing of all input k-mers is the bottleneck,
 //! and the sorting of the small sample of k-mers is relatively fast.
 //!
-//! For bin-mash we assign each element to its bucket via its remainder modulo `s`.
+//! For bucket sketch we assign each element to its bucket via its remainder modulo `s`.
 //! We compute this efficiently using [fast-mod](https://github.com/lemire/fastmod/blob/master/include/fastmod.h).
 //!
 //! ## Performance
@@ -102,7 +102,7 @@
 //! more), when running on a single thread.
 //!
 //! Comparing sketches is relatively fast, but can become a bottleneck when there are many input sequences,
-//! since the number of comparisons grows quadratically. In this case, prefer bin-mash.
+//! since the number of comparisons grows quadratically. In this case, prefer bucket sketch.
 //! As an example, when sketching 5MB bacterial genomes using `s=10000`, each sketch takes 4ms.
 //! Comparing two sketches takes 1.6us.
 //! This starts to be the dominant factor when the number of input sequences is more than 5000.
@@ -146,15 +146,15 @@ impl BitSketch {
 }
 
 /// A sketch containing the `s` smallest k-mer hashes.
-pub struct BottomMash {
+pub struct BottomSketch {
     rc: bool,
     k: usize,
     b: usize,
     bottom: Vec<u32>,
 }
 
-impl BottomMash {
-    /// Compute the similarity between two `BottomMash`es.
+impl BottomSketch {
+    /// Compute the similarity between two `BottomSketch`es.
     pub fn similarity(&self, other: &Self) -> f32 {
         assert_eq!(self.rc, other.rc);
         assert_eq!(self.k, other.k);
@@ -180,20 +180,20 @@ impl BottomMash {
 }
 
 /// A sketch containing the smallest k-mer hash for each remainder mod `s`.
-pub struct BinMash {
+pub struct BucketSketch {
     rc: bool,
     k: usize,
     b: usize,
-    bins: BitSketch,
+    buckets: BitSketch,
 }
 
-impl BinMash {
-    /// Compute the similarity between two `BinMash`es.
+impl BucketSketch {
+    /// Compute the similarity between two `BucketSketch`es.
     pub fn similarity(&self, other: &Self) -> f32 {
         assert_eq!(self.rc, other.rc);
         assert_eq!(self.k, other.k);
         assert_eq!(self.b, other.b);
-        match (&self.bins, &other.bins) {
+        match (&self.buckets, &other.buckets) {
             (BitSketch::B32(a), BitSketch::B32(b)) => Self::inner_similarity(a, b),
             (BitSketch::B16(a), BitSketch::B16(b)) => Self::inner_similarity(a, b),
             (BitSketch::B8(a), BitSketch::B8(b)) => Self::inner_similarity(a, b),
@@ -219,10 +219,10 @@ impl BinMash {
     }
 }
 
-/// An object containing the mash parameters.
+/// An object containing the sketch parameters.
 ///
 /// Contains internal state to optimize the implementation when sketching multiple similar sequences.
-pub struct Masher<const RC: bool> {
+pub struct Sketcher<const RC: bool> {
     k: usize,
     s: usize,
     b: usize,
@@ -230,10 +230,10 @@ pub struct Masher<const RC: bool> {
     factor: AtomicUsize,
 }
 
-impl Masher<false> {
-    /// Construct a new forward-only `Masher` object.
+impl Sketcher<false> {
+    /// Construct a new forward-only `Sketcher` object.
     pub fn new(k: usize, s: usize, b: usize) -> Self {
-        Masher::<false> {
+        Sketcher::<false> {
             k,
             s,
             b,
@@ -242,10 +242,10 @@ impl Masher<false> {
     }
 }
 
-impl Masher<true> {
-    /// Construct a new reverse-complement-aware `Masher` object.
+impl Sketcher<true> {
+    /// Construct a new reverse-complement-aware `Sketcher` object.
     pub fn new_rc(k: usize, s: usize, b: usize) -> Self {
-        Masher::<true> {
+        Sketcher::<true> {
             k,
             s,
             b,
@@ -254,9 +254,9 @@ impl Masher<true> {
     }
 }
 
-impl<const RC: bool> Masher<RC> {
+impl<const RC: bool> Sketcher<RC> {
     /// Return the `s` smallest `u32` k-mer hashes.
-    pub fn bottom_mash<'s, S: Seq<'s>>(&self, seq: S) -> BottomMash {
+    pub fn bottom_sketch<'s, S: Seq<'s>>(&self, seq: S) -> BottomSketch {
         // Iterate all kmers and compute 32bit nthashes.
         let n = seq.len();
         let mut out = vec![];
@@ -273,7 +273,7 @@ impl<const RC: bool> Masher<RC> {
                 if bound == u32::MAX || out.len() >= self.s {
                     out.resize(self.s, u32::MAX);
 
-                    break BottomMash {
+                    break BottomSketch {
                         rc: RC,
                         k: self.k,
                         b: self.b,
@@ -290,11 +290,11 @@ impl<const RC: bool> Masher<RC> {
     /// Split the hashes into `s` buckets and return the smallest hash in each bucket.
     ///
     /// Buckets are determined via the remainder mod `s`.
-    pub fn bin_mash<'s, S: Seq<'s>>(&self, seq: S) -> BinMash {
+    pub fn bucket_sketch<'s, S: Seq<'s>>(&self, seq: S) -> BucketSketch {
         // Iterate all kmers and compute 32bit nthashes.
         let n = seq.len();
         let mut out = vec![];
-        let mut bins = vec![u32::MAX; self.s];
+        let mut buckets = vec![u32::MAX; self.s];
         loop {
             let target = u32::MAX as usize / n * self.s;
             let bound =
@@ -305,23 +305,23 @@ impl<const RC: bool> Masher<RC> {
             if bound == u32::MAX || out.len() >= self.s {
                 let m = FM32::new(self.s as u32);
                 for &hash in &out {
-                    let bin = m.fastmod(hash);
-                    bins[bin] = bins[bin].min(hash);
+                    let bucket = m.fastmod(hash);
+                    buckets[bucket] = buckets[bucket].min(hash);
                 }
                 let mut empty = 0;
-                for &x in &bins {
+                for &x in &buckets {
                     if x == u32::MAX {
                         empty += 1;
                     }
                 }
                 if bound == u32::MAX || empty == 0 {
-                    break BinMash {
+                    break BucketSketch {
                         rc: RC,
                         k: self.k,
                         b: self.b,
-                        bins: BitSketch::new(
+                        buckets: BitSketch::new(
                             self.b,
-                            bins.into_iter().map(|x| m.fastdiv(x) as u32).collect(),
+                            buckets.into_iter().map(|x| m.fastdiv(x) as u32).collect(),
                         ),
                     };
                 }
@@ -396,15 +396,15 @@ fn test() {
     for n in 31..100 {
         let s = n - k + 1;
         let seq = packed_seq::PackedSeqVec::random(n);
-        let masher = crate::Masher::new(k, s, b);
-        let bottom = masher.bottom_mash(seq.as_slice()).bottom;
+        let sketcher = crate::Sketcher::new(k, s, b);
+        let bottom = sketcher.bottom_sketch(seq.as_slice()).bottom;
         assert_eq!(bottom.len(), s);
         assert!(bottom.is_sorted());
 
         let s = s.min(10);
         let seq = packed_seq::PackedSeqVec::random(n);
-        let masher = crate::Masher::new(k, s, b);
-        let bottom = masher.bottom_mash(seq.as_slice()).bottom;
+        let sketcher = crate::Sketcher::new(k, s, b);
+        let bottom = sketcher.bottom_sketch(seq.as_slice()).bottom;
         assert_eq!(bottom.len(), s);
         assert!(bottom.is_sorted());
     }
@@ -420,8 +420,8 @@ fn rc() {
         for n in (0..10).map(|_| rand::random_range(k..1000)) {
             for s in (0..10).map(|_| rand::random_range(0..n - k + 1)) {
                 let seq = packed_seq::AsciiSeqVec::random(n);
-                let masher = crate::Masher::new_rc(k, s, b);
-                let bottom = masher.bottom_mash(seq.as_slice()).bottom;
+                let sketcher = crate::Sketcher::new_rc(k, s, b);
+                let bottom = sketcher.bottom_sketch(seq.as_slice()).bottom;
                 assert_eq!(bottom.len(), s);
                 assert!(bottom.is_sorted());
 
@@ -433,7 +433,7 @@ fn rc() {
                         .collect::<Vec<_>>(),
                 );
 
-                let bottom_rc = masher.bottom_mash(seq_rc.as_slice()).bottom;
+                let bottom_rc = sketcher.bottom_sketch(seq_rc.as_slice()).bottom;
                 assert_eq!(bottom, bottom_rc);
             }
         }

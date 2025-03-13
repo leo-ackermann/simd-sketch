@@ -14,12 +14,12 @@ fn main() {
     let seq = PackedSeqVec::random(n);
 
     let start = std::time::Instant::now();
-    let masher = simd_mash::Masher::new(k, s, b);
-    let mash = masher.bottom_mash(seq.as_slice());
+    let sketcher = simd_sketch::Sketcher::new(k, s, b);
+    let sketch = sketcher.bottom_sketch(seq.as_slice());
     let elapsed = start.elapsed();
 
     tracing::info!("{s} hashes in {elapsed:?}");
-    black_box(mash);
+    black_box(sketch);
 }
 
 fn init_trace() {
