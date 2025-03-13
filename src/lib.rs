@@ -2,14 +2,16 @@
 //!
 //! This library provides two types of sequence sketches:
 //! - the classic bottom-`s` sketch;
-//! - the newer bucket-sketch, returning the smallest hash in each of `s` buckets.
+//! - the newer bucket sketch, returning the smallest hash in each of `s` buckets.
+//!
+//! See the corresponding [blogpost](https://curiouscoding.nl/posts/simd-sketch/) for more background and an evaluation.
 //!
 //! ## Hash function
 //! All internal hashes are 32 bits. Either a forward-only hash or
 //! reverse-complement-aware (canonical) hash can be used.
 //!
-//! *TODO:* Current we use (canonical) ntHash. This causes some hash-collisions
-//! for `k <= 16`, [which can be avoided](https://curiouscoding.nl/posts/nthash/#is-nthash-injective-on-kmers).
+//! **TODO:** Current we use (canonical) ntHash. This causes some hash-collisions
+//! for `k <= 16`, [which could be avoided](https://curiouscoding.nl/posts/nthash/#is-nthash-injective-on-kmers).
 //!
 //! ## BucketSketch
 //! For classic bottom-sketch, evaluating the similarity is slow because a
@@ -25,6 +27,10 @@
 //!
 //! The bucket sketch similarity has a very strong one-to-one correlation with the classic bottom-sketch.
 //!
+//! **TODO:** A drawback of this method is that some buckets may remain empty
+//! when the input sequences are not long enough.  In that case, _densification_
+//! could be applied, but this is not currently implemented. If you need this, please reach out.
+//!
 //! ## Jaccard similarity
 //! For the bottom sketch, we conceptually estimate similarity as follows:
 //! 1. Find the smallest `s` distinct k-mer hashes in the union of two sketches.
@@ -33,22 +39,29 @@
 //! For the bucket sketch, we simply return the fraction of partitions that have
 //! the same k-mer for both sequences.
 //!
+//! ## b-bit sketches
+//!
+//! Instead of storing the full 32-bit hashes, it is sufficient to only store the low bits of each hash.
+//! In practice, `b=8` is usually fine.
+//! When extra fast comparisons are needed, use `b=1` in combination with a 3 to 4x larger `s`.
+//!
 //! ## Usage
 //!
 //! The main entrypoint of this library is the [`Sketcher`] object.
 //! Construct it in either the forward or canonical variant, and give `k` and `s`.
-//! Then call either [`Sketcher::bottom_sketch`] or [`Sketcher::bucket_sketch`] on it, and use the
+//! Then call either [`Sketcher::bottom_sketch`] or [`Sketcher::sketch`] on it, and use the
 //! `similarity` functions on the returned [`BottomSketch`] and [`BucketSketch`] objects.
 //!
 //! ```
 //! use packed_seq::SeqVec;
 //!
-//! // Bottom s=10000 sketch of k=31-mers.
-//! let k = 31;
-//! let s = 10_000;
+//! let k = 31;   // Hash all k-mers.
+//! let s = 8192; // Sample 8192 hashes
+//! let b = 8;    // Store the bottom 8 bits of each hash.
 //!
-//! // Use `new_rc` for a canonical version instead.
-//! let sketcher = simd_sketch::Sketcher::new(k, s);
+//! // Use `new_rc` for a canonical (reverse-complement aware) hash.
+//! // `new_fwd` uses a plain forward hash instead.
+//! let sketcher = simd_sketch::Sketcher::new_rc(k, s, b);
 //!
 //! // Generate two random sequences of 2M characters.
 //! let n = 2_000_000;
@@ -69,8 +82,14 @@
 //! let sketch2: simd_sketch::BucketSketch = sketcher.bucket_sketch(seq2.as_slice());
 //!
 //! // Value between 0 and 1, estimating the fraction of shared k-mers.
-//! let similarity = sketch1.similarity(&sketch2);
+//! let similarity: f32 = sketch1.similarity(&sketch2);
 //! ```
+//!
+//! **TODO:** Currently there is no support yet for merging sketches, or for
+//! sketching multiple sequences into one sketch. It's not hard, I just need to find a good API.
+//! Please reach out if you're interested in this.
+//!
+//! **TODO:** If you would like a binary instead of a library, again, please reach out :)
 //!
 //! ## Implementation notes
 //!
@@ -106,8 +125,6 @@
 //! As an example, when sketching 5MB bacterial genomes using `s=10000`, each sketch takes 4ms.
 //! Comparing two sketches takes 1.6us.
 //! This starts to be the dominant factor when the number of input sequences is more than 5000.
-//!
-//! TODO: Document `b`.
 
 mod intrinsics;
 
