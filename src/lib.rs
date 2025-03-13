@@ -150,7 +150,7 @@ pub struct BottomMash {
     rc: bool,
     k: usize,
     b: usize,
-    bottom: BitSketch,
+    bottom: Vec<u32>,
 }
 
 impl BottomMash {
@@ -159,15 +159,8 @@ impl BottomMash {
         assert_eq!(self.rc, other.rc);
         assert_eq!(self.k, other.k);
         assert_eq!(self.b, other.b);
-        match (&self.bottom, &other.bottom) {
-            (BitSketch::B32(a), BitSketch::B32(b)) => Self::inner_similarity(a, b),
-            (BitSketch::B16(a), BitSketch::B16(b)) => Self::inner_similarity(a, b),
-            (BitSketch::B8(a), BitSketch::B8(b)) => Self::inner_similarity(a, b),
-            _ => panic!("Bit width mismatch"),
-        }
-    }
-
-    fn inner_similarity<T: Eq + Ord>(a: &Vec<T>, b: &Vec<T>) -> f32 {
+        let a = &self.bottom;
+        let b = &other.bottom;
         assert_eq!(a.len(), b.len());
         let mut intersection_size = 0;
         let mut union_size = 0;
@@ -284,7 +277,7 @@ impl<const RC: bool> Masher<RC> {
                         rc: RC,
                         k: self.k,
                         b: self.b,
-                        bottom: BitSketch::new(self.b, out),
+                        bottom: out,
                     };
                 }
             }
@@ -404,20 +397,14 @@ fn test() {
         let s = n - k + 1;
         let seq = packed_seq::PackedSeqVec::random(n);
         let masher = crate::Masher::new(k, s, b);
-        let mash = masher.bottom_mash(seq.as_slice());
-        let BitSketch::B16(bottom) = mash.bottom else {
-            panic!()
-        };
+        let bottom = masher.bottom_mash(seq.as_slice()).bottom;
         assert_eq!(bottom.len(), s);
         assert!(bottom.is_sorted());
 
         let s = s.min(10);
         let seq = packed_seq::PackedSeqVec::random(n);
         let masher = crate::Masher::new(k, s, b);
-        let mash = masher.bottom_mash(seq.as_slice());
-        let BitSketch::B16(bottom) = mash.bottom else {
-            panic!()
-        };
+        let bottom = masher.bottom_mash(seq.as_slice()).bottom;
         assert_eq!(bottom.len(), s);
         assert!(bottom.is_sorted());
     }
@@ -434,10 +421,7 @@ fn rc() {
             for s in (0..10).map(|_| rand::random_range(0..n - k + 1)) {
                 let seq = packed_seq::AsciiSeqVec::random(n);
                 let masher = crate::Masher::new_rc(k, s, b);
-                let mash = masher.bottom_mash(seq.as_slice());
-                let BitSketch::B32(bottom) = mash.bottom else {
-                    panic!()
-                };
+                let bottom = masher.bottom_mash(seq.as_slice()).bottom;
                 assert_eq!(bottom.len(), s);
                 assert!(bottom.is_sorted());
 
@@ -449,10 +433,7 @@ fn rc() {
                         .collect::<Vec<_>>(),
                 );
 
-                let mash_rc = masher.bottom_mash(seq_rc.as_slice());
-                let BitSketch::B32(bottom_rc) = mash_rc.bottom else {
-                    panic!()
-                };
+                let bottom_rc = masher.bottom_mash(seq_rc.as_slice()).bottom;
                 assert_eq!(bottom, bottom_rc);
             }
         }
