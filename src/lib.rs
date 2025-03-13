@@ -121,6 +121,7 @@ enum BitSketch {
     B32(Vec<u32>),
     B16(Vec<u16>),
     B8(Vec<u8>),
+    B1(Vec<u64>),
 }
 
 impl BitSketch {
@@ -129,7 +130,17 @@ impl BitSketch {
             32 => BitSketch::B32(vals),
             16 => BitSketch::B16(vals.into_iter().map(|x| x as u16).collect()),
             8 => BitSketch::B8(vals.into_iter().map(|x| x as u8).collect()),
-            _ => panic!("Unsupported bit width. Must be 8 or 16 or 32."),
+            1 => BitSketch::B1({
+                assert_eq!(vals.len() % 64, 0);
+                vals.chunks_exact(64)
+                    .map(|xs| {
+                        xs.iter()
+                            .enumerate()
+                            .fold(0u64, |bits, (i, x)| bits | (((x & 1) as u64) << i))
+                    })
+                    .collect()
+            }),
+            _ => panic!("Unsupported bit width. Must be 1 or 8 or 16 or 32."),
         }
     }
 }
@@ -193,6 +204,7 @@ impl BinMash {
             (BitSketch::B32(a), BitSketch::B32(b)) => Self::inner_similarity(a, b),
             (BitSketch::B16(a), BitSketch::B16(b)) => Self::inner_similarity(a, b),
             (BitSketch::B8(a), BitSketch::B8(b)) => Self::inner_similarity(a, b),
+            (BitSketch::B1(a), BitSketch::B1(b)) => Self::b1_similarity(a, b),
             _ => panic!("Bit width mismatch"),
         }
     }
@@ -202,6 +214,15 @@ impl BinMash {
             .map(|(a, b)| (a == b) as u32)
             .sum::<u32>() as f32
             / a.len() as f32
+    }
+
+    fn b1_similarity(a: &Vec<u64>, b: &Vec<u64>) -> f32 {
+        assert_eq!(a.len(), b.len());
+        let f = std::iter::zip(a, b)
+            .map(|(a, b)| (*a ^ *b).count_zeros())
+            .sum::<u32>() as f32
+            / (64 * a.len()) as f32;
+        2. * f - 1.
     }
 }
 
