@@ -63,7 +63,7 @@ fn main() {
         trace!("Reading & filtering took {:?}", start.elapsed());
         let start = std::time::Instant::now();
         if args.bucket {
-            bucket_sketches.push(sketcher.bucket_sketch(seq.as_slice()));
+            bucket_sketches.push(sketcher.sketch(seq.as_slice()));
         } else {
             bottom_sketches.push(sketcher.bottom_sketch(seq.as_slice()));
         };

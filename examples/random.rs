@@ -14,7 +14,7 @@ fn main() {
     let seq = PackedSeqVec::random(n);
 
     let start = std::time::Instant::now();
-    let sketcher = simd_sketch::Sketcher::new(k, s, b);
+    let sketcher = simd_sketch::Sketcher::new_fwd(k, s, b);
     let sketch = sketcher.bottom_sketch(seq.as_slice());
     let elapsed = start.elapsed();
 

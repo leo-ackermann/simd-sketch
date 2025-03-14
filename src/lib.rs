@@ -78,8 +78,8 @@
 //!
 //! // Bucket sketch variant
 //!
-//! let sketch1: simd_sketch::BucketSketch = sketcher.bucket_sketch(seq1.as_slice());
-//! let sketch2: simd_sketch::BucketSketch = sketcher.bucket_sketch(seq2.as_slice());
+//! let sketch1: simd_sketch::BucketSketch = sketcher.sketch(seq1.as_slice());
+//! let sketch2: simd_sketch::BucketSketch = sketcher.sketch(seq2.as_slice());
 //!
 //! // Value between 0 and 1, estimating the fraction of shared k-mers.
 //! let similarity: f32 = sketch1.similarity(&sketch2);
@@ -239,7 +239,8 @@ impl BucketSketch {
 /// An object containing the sketch parameters.
 ///
 /// Contains internal state to optimize the implementation when sketching multiple similar sequences.
-pub struct Sketcher<const RC: bool> {
+pub struct Sketcher {
+    rc: bool,
     k: usize,
     s: usize,
     b: usize,
@@ -247,22 +248,48 @@ pub struct Sketcher<const RC: bool> {
     factor: AtomicUsize,
 }
 
-impl Sketcher<false> {
+impl Sketcher {
+    /// Default sketcher that very fast at comparisons, but 20% slower at sketching.
+    /// Use for >= 50000 seqs, and safe default when input sequences are > 500'000 characters.
+    ///
+    /// When sequences are < 100'000 characters, inaccuracies may occur due to empty buckets.
+    pub fn default(k: usize) -> Self {
+        Sketcher {
+            rc: true,
+            k,
+            s: 32768,
+            b: 1,
+            factor: 2.into(),
+        }
+    }
+
+    /// Default sketcher that is fast at sketching, but somewhat slower at comparisons.
+    /// Use for <= 5000 seqs, or when input sequences are < 100'000 characters.
+    pub fn default_fast_sketching(k: usize) -> Self {
+        Sketcher {
+            rc: true,
+            k,
+            s: 8192,
+            b: 8,
+            factor: 2.into(),
+        }
+    }
+
     /// Construct a new forward-only `Sketcher` object.
-    pub fn new(k: usize, s: usize, b: usize) -> Self {
-        Sketcher::<false> {
+    pub fn new_fwd(k: usize, s: usize, b: usize) -> Self {
+        Sketcher {
+            rc: false,
             k,
             s,
             b,
             factor: 2.into(),
         }
     }
-}
 
-impl Sketcher<true> {
     /// Construct a new reverse-complement-aware `Sketcher` object.
     pub fn new_rc(k: usize, s: usize, b: usize) -> Self {
-        Sketcher::<true> {
+        Sketcher {
+            rc: true,
             k,
             s,
             b,
@@ -271,8 +298,10 @@ impl Sketcher<true> {
     }
 }
 
-impl<const RC: bool> Sketcher<RC> {
+impl Sketcher {
     /// Return the `s` smallest `u32` k-mer hashes.
+    /// Prefer [`Sketcher::sketch`] instead, which is much faster and just as
+    /// accurate when input sequences are not too short.
     pub fn bottom_sketch<'s, S: Seq<'s>>(&self, seq: S) -> BottomSketch {
         // Iterate all kmers and compute 32bit nthashes.
         let n = seq.len();
@@ -282,7 +311,7 @@ impl<const RC: bool> Sketcher<RC> {
             let bound =
                 (target.saturating_mul(self.factor.load(SeqCst))).min(u32::MAX as usize) as u32;
 
-            collect_up_to_bound::<RC, S>(seq, self.k, bound, &mut out);
+            self.collect_up_to_bound(seq, bound, &mut out);
 
             if bound == u32::MAX || out.len() >= self.s {
                 out.sort_unstable();
@@ -291,7 +320,7 @@ impl<const RC: bool> Sketcher<RC> {
                     out.resize(self.s, u32::MAX);
 
                     break BottomSketch {
-                        rc: RC,
+                        rc: self.rc,
                         k: self.k,
                         b: self.b,
                         bottom: out,
@@ -304,10 +333,9 @@ impl<const RC: bool> Sketcher<RC> {
         }
     }
 
-    /// Split the hashes into `s` buckets and return the smallest hash in each bucket.
-    ///
+    /// s-buckets sketch. Splits the hashes into `s` buckets and returns the smallest hash per bucket.
     /// Buckets are determined via the remainder mod `s`.
-    pub fn bucket_sketch<'s, S: Seq<'s>>(&self, seq: S) -> BucketSketch {
+    pub fn sketch<'s, S: Seq<'s>>(&self, seq: S) -> BucketSketch {
         // Iterate all kmers and compute 32bit nthashes.
         let n = seq.len();
         let mut out = vec![];
@@ -317,7 +345,7 @@ impl<const RC: bool> Sketcher<RC> {
             let bound =
                 (target.saturating_mul(self.factor.load(SeqCst))).min(u32::MAX as usize) as u32;
 
-            collect_up_to_bound::<RC, S>(seq, self.k, bound, &mut out);
+            self.collect_up_to_bound(seq, bound, &mut out);
 
             if bound == u32::MAX || out.len() >= self.s {
                 let m = FM32::new(self.s as u32);
@@ -333,7 +361,7 @@ impl<const RC: bool> Sketcher<RC> {
                 }
                 if bound == u32::MAX || empty == 0 {
                     break BucketSketch {
-                        rc: RC,
+                        rc: self.rc,
                         k: self.k,
                         b: self.b,
                         buckets: BitSketch::new(
@@ -348,9 +376,16 @@ impl<const RC: bool> Sketcher<RC> {
             debug!("Increase factor to {}", self.factor.load(SeqCst));
         }
     }
+    fn collect_up_to_bound<'s, S: Seq<'s>>(&self, seq: S, bound: u32, out: &mut Vec<u32>) {
+        if self.rc {
+            collect_up_to_bound_generic::<true, S>(seq, self.k, bound, out);
+        } else {
+            collect_up_to_bound_generic::<false, S>(seq, self.k, bound, out);
+        }
+    }
 }
 
-fn collect_up_to_bound<'s, const RC: bool, S: Seq<'s>>(
+fn collect_up_to_bound_generic<'s, const RC: bool, S: Seq<'s>>(
     seq: S,
     k: usize,
     bound: u32,
@@ -413,14 +448,14 @@ fn test() {
     for n in 31..100 {
         let s = n - k + 1;
         let seq = packed_seq::PackedSeqVec::random(n);
-        let sketcher = crate::Sketcher::new(k, s, b);
+        let sketcher = crate::Sketcher::new_fwd(k, s, b);
         let bottom = sketcher.bottom_sketch(seq.as_slice()).bottom;
         assert_eq!(bottom.len(), s);
         assert!(bottom.is_sorted());
 
         let s = s.min(10);
         let seq = packed_seq::PackedSeqVec::random(n);
-        let sketcher = crate::Sketcher::new(k, s, b);
+        let sketcher = crate::Sketcher::new_fwd(k, s, b);
         let bottom = sketcher.bottom_sketch(seq.as_slice()).bottom;
         assert_eq!(bottom.len(), s);
         assert!(bottom.is_sorted());
