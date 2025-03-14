@@ -4,7 +4,7 @@
 [![docs.rs](https://img.shields.io/docsrs/simd-sketch.svg)](https://docs.rs/simd-sketch)
 
 A SIMD-accelerated library to compute two types of sketches:
-- Classic bottom-$s$ sketch, containing the $s$ smallest distinct k-mer hashes.
+- Classic bottom $s$ sketch, containing the $s$ smallest distinct k-mer hashes.
 - Bucket sketch, which partitions the hashes into $s$ parts and returns the smallest
   hash in each part. (Introduced as *one permutation hashing* in Li, Owen, Zhang 2012.)
 
@@ -16,7 +16,7 @@ hashes. This means that currently it may not be very suitable for sequences that
 too close to 1Gbp in length, since the bottom hash values will be relatively dense.
 
 **Algorithm.**
-For the bottom-$s$ sketch, we first collect all ``sufficiently small'' hashes
+For the bottom $s$ sketch, we first collect all ``sufficiently small'' hashes
 into a vector. Then, that vector is sorted and deduplicated, and the smallest
 $s$ values are returned. This ensures that the runtime is $O(n + s \log s)$ when
 the number of duplicate k-mers is limited.
