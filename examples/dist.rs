@@ -38,7 +38,8 @@ fn main() {
     let s = args.s;
     let b = args.b;
 
-    let sketcher = simd_sketch::Sketcher::new_rc(k, s, b);
+    let mut sketcher = simd_sketch::Sketcher::new_rc(k, s, b);
+    sketcher.filter_empty = true;
 
     let mut bottom_sketches = vec![];
     let mut bucket_sketches = vec![];

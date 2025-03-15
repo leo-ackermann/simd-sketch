@@ -132,7 +132,7 @@ use std::sync::atomic::{AtomicUsize, Ordering::SeqCst};
 
 use packed_seq::{u32x8, Seq};
 use simd_minimizers::private::nthash::NtHasher;
-use tracing::debug;
+use tracing::{debug, info};
 
 enum BitSketch {
     B32(Vec<u32>),
@@ -202,6 +202,7 @@ pub struct BucketSketch {
     k: usize,
     b: usize,
     buckets: BitSketch,
+    empty: Vec<u64>,
 }
 
 impl BucketSketch {
@@ -210,15 +211,19 @@ impl BucketSketch {
         assert_eq!(self.rc, other.rc);
         assert_eq!(self.k, other.k);
         assert_eq!(self.b, other.b);
+        let both_empty = self.both_empty(other);
+        if both_empty > 0 {
+            info!("Both empty: {}", both_empty);
+        }
         match (&self.buckets, &other.buckets) {
-            (BitSketch::B32(a), BitSketch::B32(b)) => Self::inner_similarity(a, b),
-            (BitSketch::B16(a), BitSketch::B16(b)) => Self::inner_similarity(a, b),
-            (BitSketch::B8(a), BitSketch::B8(b)) => Self::inner_similarity(a, b),
-            (BitSketch::B1(a), BitSketch::B1(b)) => Self::b1_similarity(a, b),
+            (BitSketch::B32(a), BitSketch::B32(b)) => Self::inner_similarity(a, b, both_empty),
+            (BitSketch::B16(a), BitSketch::B16(b)) => Self::inner_similarity(a, b, both_empty),
+            (BitSketch::B8(a), BitSketch::B8(b)) => Self::inner_similarity(a, b, both_empty),
+            (BitSketch::B1(a), BitSketch::B1(b)) => Self::b1_similarity(a, b, both_empty),
             _ => panic!("Bit width mismatch"),
         }
     }
-    fn inner_similarity<T: Eq>(a: &Vec<T>, b: &Vec<T>) -> f32 {
+    fn inner_similarity<T: Eq>(a: &Vec<T>, b: &Vec<T>, both_empty: usize) -> f32 {
         assert_eq!(a.len(), b.len());
         std::iter::zip(a, b)
             .map(|(a, b)| (a == b) as u32)
@@ -226,13 +231,21 @@ impl BucketSketch {
             / a.len() as f32
     }
 
-    fn b1_similarity(a: &Vec<u64>, b: &Vec<u64>) -> f32 {
+    fn b1_similarity(a: &Vec<u64>, b: &Vec<u64>, both_empty: usize) -> f32 {
         assert_eq!(a.len(), b.len());
         let f = std::iter::zip(a, b)
             .map(|(a, b)| (*a ^ *b).count_zeros())
             .sum::<u32>() as f32
-            / (64 * a.len()) as f32;
+            / (64 * a.len() - both_empty) as f32;
+
+        // Correction for accidental matches.
         2. * f - 1.
+    }
+
+    fn both_empty(&self, other: &Self) -> usize {
+        std::iter::zip(&self.empty, &other.empty)
+            .map(|(a, b)| (a & b).count_ones())
+            .sum::<u32>() as usize
     }
 }
 
@@ -244,6 +257,7 @@ pub struct Sketcher {
     k: usize,
     s: usize,
     b: usize,
+    pub filter_empty: bool,
 
     factor: AtomicUsize,
 }
@@ -259,6 +273,7 @@ impl Sketcher {
             k,
             s: 32768,
             b: 1,
+            filter_empty: false,
             factor: 2.into(),
         }
     }
@@ -271,6 +286,7 @@ impl Sketcher {
             k,
             s: 8192,
             b: 8,
+            filter_empty: false,
             factor: 2.into(),
         }
     }
@@ -282,6 +298,7 @@ impl Sketcher {
             k,
             s,
             b,
+            filter_empty: false,
             factor: 2.into(),
         }
     }
@@ -293,6 +310,7 @@ impl Sketcher {
             k,
             s,
             b,
+            filter_empty: false,
             factor: 2.into(),
         }
     }
@@ -360,10 +378,29 @@ impl Sketcher {
                     }
                 }
                 if bound == u32::MAX || empty == 0 {
+                    if empty > 0 {
+                        info!("Found {empty} empty buckets.");
+                    }
+                    let empty = if empty > 0 && self.filter_empty {
+                        info!("Found {empty} empty buckets. Storing bitmask.");
+                        assert_eq!(buckets.len() % 64, 0);
+                        buckets
+                            .chunks_exact(64)
+                            .map(|xs| {
+                                xs.iter().enumerate().fold(0u64, |bits, (i, x)| {
+                                    bits | (((*x == u32::MAX) as u64) << i)
+                                })
+                            })
+                            .collect()
+                    } else {
+                        vec![]
+                    };
+
                     break BucketSketch {
                         rc: self.rc,
                         k: self.k,
                         b: self.b,
+                        empty,
                         buckets: BitSketch::new(
                             self.b,
                             buckets.into_iter().map(|x| m.fastdiv(x) as u32).collect(),
