@@ -134,7 +134,7 @@ use packed_seq::{u32x8, Seq};
 use simd_minimizers::private::nthash::NtHasher;
 use tracing::{debug, info};
 
-enum BitSketch {
+pub enum BitSketch {
     B32(Vec<u32>),
     B16(Vec<u16>),
     B8(Vec<u8>),
@@ -201,7 +201,7 @@ pub struct BucketSketch {
     rc: bool,
     k: usize,
     b: usize,
-    buckets: BitSketch,
+    pub buckets: BitSketch,
     empty: Vec<u64>,
 }
 
