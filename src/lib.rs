@@ -225,10 +225,14 @@ impl BucketSketch {
     }
     fn inner_similarity<T: Eq>(a: &Vec<T>, b: &Vec<T>, both_empty: usize) -> f32 {
         assert_eq!(a.len(), b.len());
-        std::iter::zip(a, b)
+        let f = std::iter::zip(a, b)
             .map(|(a, b)| (a == b) as u32)
             .sum::<u32>() as f32
-            / a.len() as f32
+            / (a.len() - both_empty) as f32;
+        // Correction for accidental matches.
+        let bb = (1usize << (size_of::<T>() * 8)) as f32;
+        (bb * f - 1.0) / (bb - 1.0)
+        // f
     }
 
     fn b1_similarity(a: &Vec<u64>, b: &Vec<u64>, both_empty: usize) -> f32 {
