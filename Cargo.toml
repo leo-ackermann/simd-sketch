@@ -24,5 +24,6 @@ wide = "0.7.32"
 [dev-dependencies]
 clap = { version = "4.5.31", features = ["derive"] }
 needletail = "0.6.3"
+flate2 = {version = "*", features = ["zlib-rs"]}
 rand = "0.9.0"
 tracing-subscriber = { version = "0.3.18", features = ["env-filter"] }
