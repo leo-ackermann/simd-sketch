@@ -3,25 +3,16 @@ use std::path::PathBuf;
 use clap::Parser;
 use itertools::Itertools;
 use packed_seq::{AsciiSeqVec, SeqVec};
+use simd_sketch::SketchParams;
 use std::io::Write;
 use tracing::{info, trace};
 
 #[derive(clap::Parser, Debug, Clone)]
 struct Args {
+    #[clap(flatten)]
+    params: SketchParams,
+
     paths: Vec<PathBuf>,
-    #[clap(long)]
-    bucket: bool,
-
-    /// k-mer length
-    #[clap(short, default_value_t = 31)]
-    k: usize,
-
-    /// Sketch size
-    #[clap(short, default_value_t = 10000)]
-    s: usize,
-    /// Store bottom-b bits of each element. Must be multiple of 8.
-    #[clap(short, default_value_t = 32)]
-    b: usize,
 
     #[clap(long)]
     stats: Option<PathBuf>,
@@ -34,15 +25,21 @@ fn main() {
     let paths = collect_paths(&args.paths);
     let q = paths.len();
 
-    let k = args.k;
-    let s = args.s;
-    let b = args.b;
+    let k = args.params.k;
+    let s = args.params.s;
+    let b = args.params.b;
 
-    let mut sketcher = simd_sketch::Sketcher::new_rc(k, s, b);
-    sketcher.filter_empty = true;
+    let sketcher = SketchParams {
+        alg: simd_sketch::SketchAlg::Bucket,
+        rc: true,
+        k,
+        s,
+        b,
+        filter_empty: true,
+    }
+    .build();
 
-    let mut bottom_sketches = vec![];
-    let mut bucket_sketches = vec![];
+    let mut sketches = vec![];
     let start = std::time::Instant::now();
 
     for path in paths {
@@ -63,11 +60,7 @@ fn main() {
         }
         trace!("Reading & filtering took {:?}", start.elapsed());
         let start = std::time::Instant::now();
-        if args.bucket {
-            bucket_sketches.push(sketcher.sketch(seq.as_slice()));
-        } else {
-            bottom_sketches.push(sketcher.bottom_sketch(seq.as_slice()));
-        };
+        sketches.push(sketcher.sketch(seq.as_slice()));
         trace!("sketching itself took {:?}", start.elapsed());
     }
     let t_sketch = start.elapsed();
@@ -77,19 +70,11 @@ fn main() {
     );
 
     let start = std::time::Instant::now();
-    let dists = if args.bucket {
-        bucket_sketches
-            .iter()
-            .tuple_combinations()
-            .map(|(s1, s2)| s1.similarity(s2))
-            .collect_vec()
-    } else {
-        bottom_sketches
-            .iter()
-            .tuple_combinations()
-            .map(|(s1, s2)| s1.similarity(s2))
-            .collect_vec()
-    };
+    let dists = sketches
+        .iter()
+        .tuple_combinations()
+        .map(|(s1, s2)| s1.similarity(s2))
+        .collect_vec();
     let t_dist = start.elapsed();
     let cnt = q * (q - 1) / 2;
     info!(
@@ -113,8 +98,8 @@ fn main() {
             .unwrap();
         writeln!(
             writer,
-            "SimdSketch {} {q} {k} {s} {b} {} {}",
-            if args.bucket { "bucket" } else { "bottom" },
+            "SimdSketch {:?} {q} {k} {s} {b} {} {}",
+            args.params.alg,
             t_sketch.as_secs_f32(),
             t_dist.as_secs_f32()
         )
