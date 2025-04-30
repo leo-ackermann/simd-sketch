@@ -2,8 +2,9 @@ use std::path::PathBuf;
 
 use clap::Parser;
 use packed_seq::{AsciiSeqVec, SeqVec};
+use rayon::iter::{IntoParallelIterator, IntoParallelRefIterator, ParallelIterator};
 use simd_sketch::SketchParams;
-use tracing::{info, trace};
+use tracing::info;
 
 /// Compute the sketch distance between two fasta files.
 #[derive(clap::Parser)]
@@ -52,38 +53,39 @@ fn main() {
 
     let q = paths.len();
 
-    let mut sketches = vec![];
     let sketcher = params.build();
 
     let start = std::time::Instant::now();
 
-    for path in &paths {
-        trace!("Sketching {path:?}");
-        let mut seq = AsciiSeqVec::default();
-        let mut reader = needletail::parse_fastx_file(&path).unwrap();
-        let start = std::time::Instant::now();
-        while let Some(r) = reader.next() {
-            // FIXME: Skip adjacent k-mers across fasta records.
-            seq.push_ascii(&r.unwrap().seq());
-        }
-        trace!("Reading took {:?}", start.elapsed());
-        let start = std::time::Instant::now();
-        sketches.push(sketcher.sketch(seq.as_slice()));
-        trace!("sketching itself took {:?}", start.elapsed());
-    }
+    let sketches: Vec<_> = paths
+        .par_iter()
+        .map(|path| {
+            let mut seq = AsciiSeqVec::default();
+            let mut reader = needletail::parse_fastx_file(&path).unwrap();
+            while let Some(r) = reader.next() {
+                // FIXME: Skip adjacent k-mers across fasta records.
+                seq.push_ascii(&r.unwrap().seq());
+            }
+            sketcher.sketch(seq.as_slice())
+        })
+        .collect();
     let t_sketch = start.elapsed();
     info!(
         "Sketching {q} seqs took {t_sketch:?} ({:?} avg)",
         t_sketch / q as u32
     );
 
-    let start = std::time::Instant::now();
-    let mut dists = Vec::with_capacity(q * (q - 1) / 2);
+    let mut pairs = Vec::with_capacity(q * (q - 1) / 2);
     for i in 0..q {
         for j in 0..i {
-            dists.push(sketches[i].similarity(&sketches[j]));
+            pairs.push((i, j));
         }
     }
+    let start = std::time::Instant::now();
+    let dists: Vec<_> = pairs
+        .into_par_iter()
+        .map(|(i, j)| sketches[i].similarity(&sketches[j]))
+        .collect();
     let t_dist = start.elapsed();
     let cnt = q * (q - 1) / 2;
     info!(
