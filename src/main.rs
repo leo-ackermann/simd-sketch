@@ -1,6 +1,7 @@
 use std::path::PathBuf;
 
 use clap::Parser;
+use indicatif::ParallelProgressIterator;
 use log::info;
 use packed_seq::{AsciiSeqVec, SeqVec};
 use rayon::iter::{IntoParallelIterator, IntoParallelRefIterator, ParallelIterator};
@@ -55,10 +56,19 @@ fn main() {
 
     let sketcher = params.build();
 
+    let style = indicatif::ProgressStyle::with_template(
+        "{msg:.bold} [{elapsed_precise:.cyan}] {bar} {pos}/{len} ({percent:>3}%)",
+    )
+    .unwrap()
+    .progress_chars("##-");
+
     let start = std::time::Instant::now();
 
     let sketches: Vec<_> = paths
         .par_iter()
+        .progress_with_style(style.clone())
+        .with_message("Sketching")
+        .with_finish(indicatif::ProgressFinish::AndLeave)
         .map(|path| {
             let mut seq = AsciiSeqVec::default();
             let mut reader = needletail::parse_fastx_file(&path).unwrap();
@@ -70,12 +80,14 @@ fn main() {
         })
         .collect();
     let t_sketch = start.elapsed();
+
     info!(
         "Sketching {q} seqs took {t_sketch:?} ({:?} avg)",
         t_sketch / q as u32
     );
 
-    let mut pairs = Vec::with_capacity(q * (q - 1) / 2);
+    let num_pairs = q * (q - 1) / 2;
+    let mut pairs = Vec::with_capacity(num_pairs);
     for i in 0..q {
         for j in 0..i {
             pairs.push((i, j));
@@ -84,9 +96,13 @@ fn main() {
     let start = std::time::Instant::now();
     let dists: Vec<_> = pairs
         .into_par_iter()
+        .progress_with_style(style.clone())
+        .with_message("Distances")
+        .with_finish(indicatif::ProgressFinish::AndLeave)
         .map(|(i, j)| sketches[i].mash_dist(&sketches[j]))
         .collect();
     let t_dist = start.elapsed();
+
     let cnt = q * (q - 1) / 2;
     info!(
         "Computing {cnt} dists took {t_dist:?} ({:?} avg)",
