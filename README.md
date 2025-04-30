@@ -95,7 +95,7 @@ Arguments:
 
 Options:
       --alg <ALG>        Sketch algorithm to use. Defaults to bucket because of its much faster comparisons [default: bucket] [possible values: bottom, bucket]
-      --rc               When set, use reverse-complement aware k-mer hashes
+      --fwd              When set, use forward instead of canonical k-mer hashes
   -k <K>                 k-mer size [default: 31]
   -s <S>                 Bottom-s sketch, or number of buckets [default: 10000]
   -b <B>                 For bucket-sketch, store only the lower b bits [default: 8]
@@ -120,7 +120,3 @@ Maximal usage with default parameters:
 ```sh
 simd-sketch triangle --alg bucket -k 31 -s 10000 -b 8 inputs/*.fna.gz --output matrix.phylip
 ```
-
-
-**TODO:** If you would like a binary instead of a library, please create an
-issue and propose an API.

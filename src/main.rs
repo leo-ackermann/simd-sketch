@@ -33,7 +33,7 @@ enum Command {
         /// Paths to (directories of) (gzipped) fasta files.
         paths: Vec<PathBuf>,
         /// Write phylip distance matrix here, or default to stdout.
-        #[clap(long)]
+        #[arg(long)]
         output: Option<PathBuf>,
     },
 }

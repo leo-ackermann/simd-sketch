@@ -9,12 +9,12 @@ use std::io::Write;
 
 #[derive(clap::Parser, Debug, Clone)]
 struct Args {
-    #[clap(flatten)]
+    #[command(flatten)]
     params: SketchParams,
 
     paths: Vec<PathBuf>,
 
-    #[clap(long)]
+    #[arg(long)]
     stats: Option<PathBuf>,
 }
 

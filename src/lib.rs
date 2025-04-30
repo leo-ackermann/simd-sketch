@@ -286,23 +286,29 @@ pub enum SketchAlg {
 #[derive(clap::Args, Copy, Clone, Debug)]
 pub struct SketchParams {
     /// Sketch algorithm to use. Defaults to bucket because of its much faster comparisons.
-    #[clap(long, default_value_t = SketchAlg::Bucket)]
+    #[arg(long, default_value_t = SketchAlg::Bucket)]
     #[arg(value_enum)]
     pub alg: SketchAlg,
-    /// When set, use reverse-complement-aware k-mer hashes.
-    #[clap(long)]
+    /// When set, use forward instead of canonical k-mer hashes.
+    #[arg(
+        long="fwd",
+        num_args(0),
+        action = clap::builder::ArgAction::Set,
+        default_value = "false",
+        default_missing_value = "true",
+    )]
     pub rc: bool,
     /// k-mer size.
-    #[clap(short, default_value_t = 31)]
+    #[arg(short, default_value_t = 31)]
     pub k: usize,
     /// Bottom-s sketch, or number of buckets.
-    #[clap(short, default_value_t = 10000)]
+    #[arg(short, default_value_t = 10000)]
     pub s: usize,
     /// For bucket-sketch, store only the lower b bits.
-    #[clap(short, default_value_t = 8)]
+    #[arg(short, default_value_t = 8)]
     pub b: usize,
     /// For bucket-sketch, store a bitmask of empty buckets, to increase accuracy on small genomes.
-    #[clap(skip = true)]
+    #[arg(skip = true)]
     pub filter_empty: bool,
 }
 
