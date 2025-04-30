@@ -59,7 +59,7 @@
 //! let s = 8192; // Sample 8192 hashes
 //! let b = 8;    // Store the bottom 8 bits of each hash.
 //!
-//! // Use `new_rc` for a canonical (reverse-complement aware) hash.
+//! // Use `new_rc` for a canonical (reverse-complement-aware) hash.
 //! // `new_fwd` uses a plain forward hash instead.
 //! let sketcher = simd_sketch::Sketcher::new_rc(k, s, b);
 //!
@@ -280,7 +280,7 @@ pub struct SketchParams {
     #[clap(long, default_value_t = SketchAlg::Bucket)]
     #[arg(value_enum)]
     pub alg: SketchAlg,
-    /// When set, use reverse-complement aware k-mer hashes.
+    /// When set, use reverse-complement-aware k-mer hashes.
     #[clap(long)]
     pub rc: bool,
     /// k-mer size.

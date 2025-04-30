@@ -79,5 +79,48 @@ let sketch2: simd_sketch::BinSketch = sketcher.sketch(seq2.as_slice());
 let similarity = sketch1.similarity(&sketch2);
 ```
 
+## Command line tool
+
+The crate comes with a simple command line tool for computing all-to-all
+distances matrices:
+
+```
+> simd-sketch triangle --help
+Takes paths to fasta files, and outputs a Phylip distance matrix to stdout
+
+Usage: simd-sketch triangle [OPTIONS] [PATHS]...
+
+Arguments:
+  [PATHS]...  Paths to (directories of) fasta files
+
+Options:
+      --alg <ALG>        Sketch algorithm to use. Defaults to bucket because of its much faster comparisons [default: bucket] [possible values: bottom, bucket]
+      --rc               When set, use reverse-complement aware k-mer hashes
+  -k <K>                 k-mer size [default: 31]
+  -s <S>                 Bottom-s sketch, or number of buckets [default: 10000]
+  -b <B>                 For bucket-sketch, store only the lower b bits [default: 8]
+      --output <OUTPUT>  Write phylip distance matrix here, or default to stdout
+  -h, --help             Print help
+```
+
+Minimal example usage, printing the matrix to stdout:
+
+```sh
+simd-sketch triangle inputs/*.fa
+```
+
+Typical example usage, for specific `k` and using reverse-complement-aware hashes:
+
+```sh
+simd-sketch triangle --rc -k 21 inputs/*.fa --output matrix.phylip
+```
+
+Maximal usage with default parameters:
+
+```sh
+simd-sketch triangle --alg bucket -k 31 -s 10000 -b 8 inputs/*.fa --output matrix.phylip
+```
+
+
 **TODO:** If you would like a binary instead of a library, please create an
 issue and propose an API.
