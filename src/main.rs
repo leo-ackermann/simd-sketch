@@ -108,7 +108,7 @@ fn main() {
             for i in 0..q {
                 write!(out, "{}", paths[i].to_str().unwrap()).unwrap();
                 for _ in 0..i {
-                    write!(out, "\t{:.6}", d.next().unwrap()).unwrap();
+                    write!(out, "\t{:.7}", d.next().unwrap()).unwrap();
                 }
                 writeln!(out).unwrap();
             }
