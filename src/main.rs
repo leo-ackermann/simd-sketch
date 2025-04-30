@@ -28,7 +28,7 @@ enum Command {
     Triangle {
         #[command(flatten)]
         params: SketchParams,
-        /// Paths to (directories of) fasta files.
+        /// Paths to (directories of) (gzipped) fasta files.
         paths: Vec<PathBuf>,
         /// Write phylip distance matrix here, or default to stdout.
         #[clap(long)]

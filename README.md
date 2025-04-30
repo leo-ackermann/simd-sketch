@@ -91,7 +91,7 @@ Takes paths to fasta files, and outputs a Phylip distance matrix to stdout
 Usage: simd-sketch triangle [OPTIONS] [PATHS]...
 
 Arguments:
-  [PATHS]...  Paths to (directories of) fasta files
+  [PATHS]...  Paths to (directories of) (gzipped) fasta files
 
 Options:
       --alg <ALG>        Sketch algorithm to use. Defaults to bucket because of its much faster comparisons [default: bucket] [possible values: bottom, bucket]
@@ -118,7 +118,7 @@ simd-sketch triangle --rc -k 21 inputs/*.fa --output matrix.phylip
 Maximal usage with default parameters:
 
 ```sh
-simd-sketch triangle --alg bucket -k 31 -s 10000 -b 8 inputs/*.fa --output matrix.phylip
+simd-sketch triangle --alg bucket -k 31 -s 10000 -b 8 inputs/*.fna.gz --output matrix.phylip
 ```
 
 
