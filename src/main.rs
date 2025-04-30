@@ -2,6 +2,7 @@ use std::path::PathBuf;
 
 use clap::Parser;
 use indicatif::ParallelProgressIterator;
+use itertools::Itertools;
 use log::info;
 use packed_seq::{AsciiSeqVec, SeqVec};
 use rayon::iter::{IntoParallelIterator, IntoParallelRefIterator, ParallelIterator};
@@ -70,13 +71,13 @@ fn main() {
         .with_message("Sketching")
         .with_finish(indicatif::ProgressFinish::AndLeave)
         .map(|path| {
-            let mut seq = AsciiSeqVec::default();
+            let mut seqs = vec![];
             let mut reader = needletail::parse_fastx_file(&path).unwrap();
             while let Some(r) = reader.next() {
-                // FIXME: Skip adjacent k-mers across fasta records.
-                seq.push_ascii(&r.unwrap().seq());
+                seqs.push(AsciiSeqVec::from_ascii(&r.unwrap().seq()));
             }
-            sketcher.sketch(seq.as_slice())
+            let slices = seqs.iter().map(|s| s.as_slice()).collect_vec();
+            sketcher.sketch_seqs(&slices)
         })
         .collect();
     let t_sketch = start.elapsed();

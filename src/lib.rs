@@ -358,26 +358,38 @@ impl SketchParams {
 }
 
 impl Sketcher {
+    /// Sketch a single sequence.
     pub fn sketch<'s, S: Seq<'s>>(&self, seq: S) -> Sketch {
+        self.sketch_seqs(&[seq])
+    }
+
+    /// Sketch multiple sequence (fasta records) into a single sketch.
+    pub fn sketch_seqs<'s, S: Seq<'s>>(&self, seqs: &[S]) -> Sketch {
         match self.params.alg {
-            SketchAlg::Bottom => Sketch::BottomSketch(self.bottom_sketch(seq)),
-            SketchAlg::Bucket => Sketch::BucketSketch(self.bucket_sketch(seq)),
+            SketchAlg::Bottom => Sketch::BottomSketch(self.bottom_sketch(seqs)),
+            SketchAlg::Bucket => Sketch::BucketSketch(self.bucket_sketch(seqs)),
         }
+    }
+
+    fn num_kmers<'s, S: Seq<'s>>(&self, seqs: &[S]) -> usize {
+        seqs.iter()
+            .map(|seq| seq.len() - self.params.k + 1)
+            .sum::<usize>()
     }
 
     /// Return the `s` smallest `u32` k-mer hashes.
     /// Prefer [`Sketcher::sketch`] instead, which is much faster and just as
     /// accurate when input sequences are not too short.
-    fn bottom_sketch<'s, S: Seq<'s>>(&self, seq: S) -> BottomSketch {
+    fn bottom_sketch<'s, S: Seq<'s>>(&self, seqs: &[S]) -> BottomSketch {
         // Iterate all kmers and compute 32bit nthashes.
-        let n = seq.len();
+        let n = self.num_kmers(seqs);
         let mut out = vec![];
         loop {
             let target = u32::MAX as usize / n * self.params.s;
             let bound =
                 (target.saturating_mul(self.factor.load(SeqCst))).min(u32::MAX as usize) as u32;
 
-            self.collect_up_to_bound(seq, bound, &mut out);
+            self.collect_up_to_bound(seqs, bound, &mut out);
 
             if bound == u32::MAX || out.len() >= self.params.s {
                 out.sort_unstable();
@@ -400,9 +412,9 @@ impl Sketcher {
 
     /// s-buckets sketch. Splits the hashes into `s` buckets and returns the smallest hash per bucket.
     /// Buckets are determined via the remainder mod `s`.
-    fn bucket_sketch<'s, S: Seq<'s>>(&self, seq: S) -> BucketSketch {
+    fn bucket_sketch<'s, S: Seq<'s>>(&self, seqs: &[S]) -> BucketSketch {
         // Iterate all kmers and compute 32bit nthashes.
-        let n = seq.len();
+        let n = self.num_kmers(seqs);
         let mut out = vec![];
         let mut buckets = vec![u32::MAX; self.params.s];
         loop {
@@ -410,7 +422,7 @@ impl Sketcher {
             let bound =
                 (target.saturating_mul(self.factor.load(SeqCst))).min(u32::MAX as usize) as u32;
 
-            self.collect_up_to_bound(seq, bound, &mut out);
+            self.collect_up_to_bound(seqs, bound, &mut out);
 
             if bound == u32::MAX || out.len() >= self.params.s {
                 let m = FM32::new(self.params.s as u32);
@@ -430,9 +442,8 @@ impl Sketcher {
                     }
                     let empty = if empty > 0 && self.params.filter_empty {
                         info!("Found {empty} empty buckets. Storing bitmask.");
-                        assert_eq!(buckets.len() % 64, 0);
                         buckets
-                            .chunks_exact(64)
+                            .chunks(64)
                             .map(|xs| {
                                 xs.iter().enumerate().fold(0u64, |bits, (i, x)| {
                                     bits | (((*x == u32::MAX) as u64) << i)
@@ -461,41 +472,43 @@ impl Sketcher {
         }
     }
 
-    fn collect_up_to_bound<'s, S: Seq<'s>>(&self, seq: S, bound: u32, out: &mut Vec<u32>) {
+    fn collect_up_to_bound<'s, S: Seq<'s>>(&self, seqs: &[S], bound: u32, out: &mut Vec<u32>) {
         if self.params.rc {
-            collect_up_to_bound_generic::<true, S>(seq, self.params.k, bound, out);
+            collect_up_to_bound_generic::<true, S>(seqs, self.params.k, bound, out);
         } else {
-            collect_up_to_bound_generic::<false, S>(seq, self.params.k, bound, out);
+            collect_up_to_bound_generic::<false, S>(seqs, self.params.k, bound, out);
         }
     }
 }
 
 fn collect_up_to_bound_generic<'s, const RC: bool, S: Seq<'s>>(
-    seq: S,
+    seqs: &[S],
     k: usize,
     bound: u32,
     out: &mut Vec<u32>,
 ) {
     let simd_bound = u32x8::splat(bound);
-
-    let (hashes_head, hashes_tail) =
-        simd_minimizers::private::nthash::nthash_seq_simd::<RC, S, NtHasher>(seq, k, 1);
-
     out.clear();
-    let mut write_idx = 0;
-    for hashes in hashes_head {
-        let mask = hashes.cmp_lt(simd_bound);
-        if write_idx + 8 >= out.len() {
-            out.resize(write_idx * 3 / 2 + 8, 0);
+
+    for &seq in seqs {
+        let (hashes_head, hashes_tail) =
+            simd_minimizers::private::nthash::nthash_seq_simd::<RC, S, NtHasher>(seq, k, 1);
+
+        let mut write_idx = out.len();
+        for hashes in hashes_head {
+            let mask = hashes.cmp_lt(simd_bound);
+            if write_idx + 8 >= out.len() {
+                out.resize(write_idx * 3 / 2 + 8, 0);
+            }
+            unsafe { intrinsics::append_from_mask(hashes, mask, out, &mut write_idx) };
         }
-        unsafe { intrinsics::append_from_mask(hashes, mask, out, &mut write_idx) };
-    }
 
-    out.resize(write_idx, 0);
+        out.resize(write_idx, 0);
 
-    for hash in hashes_tail {
-        if hash <= bound {
-            out.push(hash);
+        for hash in hashes_tail {
+            if hash <= bound {
+                out.push(hash);
+            }
         }
     }
 }
@@ -542,7 +555,7 @@ fn test() {
             filter_empty: false,
         }
         .build();
-        let bottom = sketcher.bottom_sketch(seq.as_slice()).bottom;
+        let bottom = sketcher.bottom_sketch(&[seq.as_slice()]).bottom;
         assert_eq!(bottom.len(), s);
         assert!(bottom.is_sorted());
 
@@ -557,7 +570,7 @@ fn test() {
             filter_empty: false,
         }
         .build();
-        let bottom = sketcher.bottom_sketch(seq.as_slice()).bottom;
+        let bottom = sketcher.bottom_sketch(&[seq.as_slice()]).bottom;
         assert_eq!(bottom.len(), s);
         assert!(bottom.is_sorted());
     }
@@ -582,7 +595,7 @@ fn rc() {
                     filter_empty: false,
                 }
                 .build();
-                let bottom = sketcher.bottom_sketch(seq.as_slice()).bottom;
+                let bottom = sketcher.bottom_sketch(&[seq.as_slice()]).bottom;
                 assert_eq!(bottom.len(), s);
                 assert!(bottom.is_sorted());
 
@@ -594,7 +607,7 @@ fn rc() {
                         .collect::<Vec<_>>(),
                 );
 
-                let bottom_rc = sketcher.bottom_sketch(seq_rc.as_slice()).bottom;
+                let bottom_rc = sketcher.bottom_sketch(&[seq_rc.as_slice()]).bottom;
                 assert_eq!(bottom, bottom_rc);
             }
         }
