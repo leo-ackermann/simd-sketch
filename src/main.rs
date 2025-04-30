@@ -104,7 +104,7 @@ fn main() {
             writeln!(out, "{q}").unwrap();
             let mut d = dists.iter();
             for i in 0..q {
-                write!(out, "{}", paths[i].file_name().unwrap().to_str().unwrap()).unwrap();
+                write!(out, "{}", paths[i].to_str().unwrap()).unwrap();
                 for _ in 0..i {
                     write!(out, "\t{:.6}", d.next().unwrap()).unwrap();
                 }
