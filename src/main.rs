@@ -4,7 +4,7 @@ use clap::Parser;
 use indicatif::ParallelProgressIterator;
 use itertools::Itertools;
 use log::info;
-use packed_seq::{AsciiSeqVec, SeqVec};
+use packed_seq::{PackedSeqVec, SeqVec};
 use rayon::iter::{IntoParallelIterator, IntoParallelRefIterator, ParallelIterator};
 use simd_sketch::SketchParams;
 
@@ -74,7 +74,7 @@ fn main() {
             let mut seqs = vec![];
             let mut reader = needletail::parse_fastx_file(&path).unwrap();
             while let Some(r) = reader.next() {
-                seqs.push(AsciiSeqVec::from_ascii(&r.unwrap().seq()));
+                seqs.push(PackedSeqVec::from_ascii(&r.unwrap().seq()));
             }
             let slices = seqs.iter().map(|s| s.as_slice()).collect_vec();
             sketcher.sketch_seqs(&slices)
