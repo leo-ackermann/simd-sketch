@@ -130,9 +130,9 @@ mod intrinsics;
 
 use std::sync::atomic::{AtomicUsize, Ordering::SeqCst};
 
+use log::{debug, info};
 use packed_seq::{u32x8, Seq};
 use simd_minimizers::private::nthash::NtHasher;
-use tracing::{debug, info};
 
 pub enum Sketch {
     BottomSketch(BottomSketch),

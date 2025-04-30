@@ -1,10 +1,10 @@
 use std::path::PathBuf;
 
 use clap::Parser;
+use log::info;
 use packed_seq::{AsciiSeqVec, SeqVec};
 use rayon::iter::{IntoParallelIterator, IntoParallelRefIterator, ParallelIterator};
 use simd_sketch::SketchParams;
-use tracing::info;
 
 /// Compute the sketch distance between two fasta files.
 #[derive(clap::Parser)]
@@ -38,7 +38,7 @@ enum Command {
 }
 
 fn main() {
-    init_trace();
+    env_logger::init();
 
     let args = Args::parse();
 
@@ -119,20 +119,6 @@ fn main() {
             }
         }
     }
-}
-
-fn init_trace() {
-    use tracing::level_filters::LevelFilter;
-    use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
-
-    tracing_subscriber::registry()
-        .with(tracing_subscriber::fmt::layer().with_writer(std::io::stderr))
-        .with(
-            tracing_subscriber::EnvFilter::builder()
-                .with_default_directive(LevelFilter::TRACE.into())
-                .from_env_lossy(),
-        )
-        .init();
 }
 
 fn collect_paths(paths: &Vec<PathBuf>) -> Vec<PathBuf> {
