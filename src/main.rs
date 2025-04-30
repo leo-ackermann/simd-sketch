@@ -84,7 +84,7 @@ fn main() {
     let start = std::time::Instant::now();
     let dists: Vec<_> = pairs
         .into_par_iter()
-        .map(|(i, j)| sketches[i].similarity(&sketches[j]))
+        .map(|(i, j)| sketches[i].mash_dist(&sketches[j]))
         .collect();
     let t_dist = start.elapsed();
     let cnt = q * (q - 1) / 2;

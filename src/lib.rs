@@ -140,12 +140,21 @@ pub enum Sketch {
 }
 
 impl Sketch {
-    pub fn similarity(&self, other: &Self) -> f32 {
+    pub fn jaccard_similarity(&self, other: &Self) -> f32 {
         match (self, other) {
             (Sketch::BottomSketch(a), Sketch::BottomSketch(b)) => a.similarity(b),
             (Sketch::BucketSketch(a), Sketch::BucketSketch(b)) => a.similarity(b),
             _ => panic!("Sketches are of different types!"),
         }
+    }
+    pub fn mash_dist(&self, other: &Self) -> f32 {
+        let j = self.jaccard_similarity(other);
+        let k = match self {
+            Sketch::BottomSketch(sketch) => sketch.k,
+            Sketch::BucketSketch(sketch) => sketch.k,
+        };
+        // See eq. 4 of mash paper.
+        -(2. * j / (1. + j)).ln() / k as f32
     }
 }
 

@@ -33,10 +33,10 @@ fn main() {
         .build();
         let s1 = bottom_sketcher.sketch(seq1.as_slice());
         let s2 = bottom_sketcher.sketch(seq2.as_slice());
-        bottom += s1.similarity(&s2);
+        bottom += s1.jaccard_similarity(&s2);
         let s1 = bucket_sketcher.sketch(seq1.as_slice());
         let s2 = bucket_sketcher.sketch(seq2.as_slice());
-        bucket += s1.similarity(&s2);
+        bucket += s1.jaccard_similarity(&s2);
     }
     println!("AVG Bottom: {}", bottom / 10.0);
     println!("AVG Bucket: {}", bucket / 10.0);

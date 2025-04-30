@@ -73,7 +73,7 @@ fn main() {
     let dists = sketches
         .iter()
         .tuple_combinations()
-        .map(|(s1, s2)| s1.similarity(s2))
+        .map(|(s1, s2)| s1.jaccard_similarity(s2))
         .collect_vec();
     let t_dist = start.elapsed();
     let cnt = q * (q - 1) / 2;
