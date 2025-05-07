@@ -32,6 +32,21 @@ the minimum.
 In both variants, we double the ``smallness'' threshold until either $s$
 distinct values are found or all $s$ buckets have a value in them.
 
+**Formulas**
+For the bottom sketch, the **Jaccard similarity** `j` is computed as follows:
+1. Find the smallest `s` distinct k-mer hashes in the union of two sketches.
+2. Return the fraction of these k-mers that occurs in both sketches.
+
+For the bucket sketch, we first identify all buckets that are not left empty by
+both sketches. Then, we take the fraction `j0` of the remaining buckets where they
+are equal. We use **b-bit sketches**, where only the bottom `b` bits of each
+bucket-minimum are stored. This gives a `1/2^b` probability of hash collisions.
+To fix this, we compute `j = (j0 - 1/2^b) / (1 - 1/2^b)` as the similarity
+corrected for these collisions.
+
+The **Mash distance** as reported by the CLI is computed as
+`-ln(2*j / (1+j))/k`.
+ This is always `>=0`, but can be as large as `inf` for disjoint sets, that have `j=0`.
 
 **Implementation notes.**
 Good performance is mostly achieved by using a branch-free implementation: all
@@ -82,7 +97,7 @@ let similarity = sketch1.similarity(&sketch2);
 ## Command line tool
 
 The crate comes with a simple command line tool for computing all-to-all
-distances matrices:
+Mash distances matrices:
 
 ```
 > simd-sketch triangle --help

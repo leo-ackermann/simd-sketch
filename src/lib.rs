@@ -30,20 +30,29 @@
 //! **TODO:** A drawback of this method is that some buckets may remain empty
 //! when the input sequences are not long enough.  In that case, _densification_
 //! could be applied, but this is not currently implemented. If you need this, please reach out.
+//! Instead, we currently simply keep a bitvector indicating empty buckets.
 //!
 //! ## Jaccard similarity
 //! For the bottom sketch, we conceptually estimate similarity as follows:
 //! 1. Find the smallest `s` distinct k-mer hashes in the union of two sketches.
 //! 2. Return the fraction of these k-mers that occurs in both sketches.
 //!
-//! For the bucket sketch, we simply return the fraction of partitions that have
-//! the same k-mer for both sequences.
+//! For the bucket sketch, we simply return the fraction of parts that have
+//! the same k-mer for both sequences (out of those that are not both empty).
 //!
 //! ## b-bit sketches
 //!
 //! Instead of storing the full 32-bit hashes, it is sufficient to only store the low bits of each hash.
 //! In practice, `b=8` is usually fine.
 //! When extra fast comparisons are needed, use `b=1` in combination with a 3 to 4x larger `s`.
+//!
+//! This causes around `1/2^b` matches because of collisions in the lower bits.
+//! We correct for this via `j = (j0 - 1/2^b) / (1 - 1/2^b)`.
+//! When the fraction of matches is less than `1/2^b`, this is negative, which we explicitly correct to `0`.
+//!
+//! ## Mash distance
+//! We compute the mash distance as `-log( 2*j / (1+j) ) / k`.
+//! This is always >=0, but can be as large as `inf` when `j=0` (as is the case for disjoint input sets).
 //!
 //! ## Usage
 //!
