@@ -549,78 +549,83 @@ impl FM32 {
 }
 
 #[cfg(test)]
-#[test]
-fn test() {
+mod test {
+    use super::*;
     use packed_seq::SeqVec;
-    let b = 16;
 
-    let k = 31;
-    for n in 31..100 {
-        let s = n - k + 1;
-        let seq = packed_seq::PackedSeqVec::random(n);
-        let sketcher = crate::SketchParams {
-            alg: SketchAlg::Bottom,
-            rc: false,
-            k,
-            s,
-            b,
-            filter_empty: false,
-        }
-        .build();
-        let bottom = sketcher.bottom_sketch(&[seq.as_slice()]).bottom;
-        assert_eq!(bottom.len(), s);
-        assert!(bottom.is_sorted());
+    #[test]
+    fn test() {
+        use packed_seq::SeqVec;
+        let b = 16;
 
-        let s = s.min(10);
-        let seq = packed_seq::PackedSeqVec::random(n);
-        let sketcher = crate::SketchParams {
-            alg: SketchAlg::Bottom,
-            rc: true,
-            k,
-            s,
-            b,
-            filter_empty: false,
+        let k = 31;
+        for n in 31..100 {
+            let s = n - k + 1;
+            let seq = packed_seq::PackedSeqVec::random(n);
+            let sketcher = crate::SketchParams {
+                alg: SketchAlg::Bottom,
+                rc: false,
+                k,
+                s,
+                b,
+                filter_empty: false,
+            }
+            .build();
+            let bottom = sketcher.bottom_sketch(&[seq.as_slice()]).bottom;
+            assert_eq!(bottom.len(), s);
+            assert!(bottom.is_sorted());
+
+            let s = s.min(10);
+            let seq = packed_seq::PackedSeqVec::random(n);
+            let sketcher = crate::SketchParams {
+                alg: SketchAlg::Bottom,
+                rc: true,
+                k,
+                s,
+                b,
+                filter_empty: false,
+            }
+            .build();
+            let bottom = sketcher.bottom_sketch(&[seq.as_slice()]).bottom;
+            assert_eq!(bottom.len(), s);
+            assert!(bottom.is_sorted());
         }
-        .build();
-        let bottom = sketcher.bottom_sketch(&[seq.as_slice()]).bottom;
-        assert_eq!(bottom.len(), s);
-        assert!(bottom.is_sorted());
     }
-}
 
-#[cfg(test)]
-#[test]
-fn rc() {
-    use packed_seq::SeqVec;
+    #[test]
+    fn rc() {
+        use packed_seq::SeqVec;
 
-    let b = 32;
-    for k in (0..10).map(|_| rand::random_range(1..100)) {
-        for n in (0..10).map(|_| rand::random_range(k..1000)) {
-            for s in (0..10).map(|_| rand::random_range(0..n - k + 1)) {
-                let seq = packed_seq::AsciiSeqVec::random(n);
-                let sketcher = crate::SketchParams {
-                    alg: SketchAlg::Bottom,
-                    rc: false,
-                    k,
-                    s,
-                    b,
-                    filter_empty: false,
+        let b = 32;
+        for k in (0..10).map(|_| rand::random_range(1..100)) {
+            for n in (0..10).map(|_| rand::random_range(k..1000)) {
+                for s in (0..10).map(|_| rand::random_range(0..n - k + 1)) {
+                    eprintln!("{k} {n} {s}");
+                    let seq = packed_seq::AsciiSeqVec::random(n);
+                    let sketcher = crate::SketchParams {
+                        alg: SketchAlg::Bottom,
+                        rc: true,
+                        k,
+                        s,
+                        b,
+                        filter_empty: false,
+                    }
+                    .build();
+                    let bottom = sketcher.bottom_sketch(&[seq.as_slice()]).bottom;
+                    assert_eq!(bottom.len(), s);
+                    assert!(bottom.is_sorted());
+
+                    let seq_rc = packed_seq::AsciiSeqVec::from_ascii(
+                        &seq.seq
+                            .iter()
+                            .rev()
+                            .map(|c| packed_seq::complement_char(*c))
+                            .collect::<Vec<_>>(),
+                    );
+
+                    let bottom_rc = sketcher.bottom_sketch(&[seq_rc.as_slice()]).bottom;
+                    assert_eq!(bottom, bottom_rc);
                 }
-                .build();
-                let bottom = sketcher.bottom_sketch(&[seq.as_slice()]).bottom;
-                assert_eq!(bottom.len(), s);
-                assert!(bottom.is_sorted());
-
-                let seq_rc = packed_seq::AsciiSeqVec::from_ascii(
-                    &seq.seq
-                        .iter()
-                        .rev()
-                        .map(|c| packed_seq::complement_char(*c))
-                        .collect::<Vec<_>>(),
-                );
-
-                let bottom_rc = sketcher.bottom_sketch(&[seq_rc.as_slice()]).bottom;
-                assert_eq!(bottom, bottom_rc);
             }
         }
     }
