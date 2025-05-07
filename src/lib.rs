@@ -149,6 +149,7 @@ impl Sketch {
     }
     pub fn mash_dist(&self, other: &Self) -> f32 {
         let j = self.jaccard_similarity(other);
+        assert!(j >= 0.0, "Jaccard similarity {j} should not be negative");
         let k = match self {
             Sketch::BottomSketch(sketch) => sketch.k,
             Sketch::BucketSketch(sketch) => sketch.k,
@@ -159,10 +160,11 @@ impl Sketch {
             mash_dist >= 0.0,
             "Bad mash distance {mash_dist} for jaccard similarity {j}"
         );
-        assert!(
-            mash_dist <= 1.0,
-            "Bad mash distance {mash_dist} for jaccard similarity {j}"
-        );
+        // NOTE: Mash distance can be >1 when jaccard similarity is close to 0.
+        // assert!(
+        //     mash_dist <= 1.0,
+        //     "Bad mash distance {mash_dist} for jaccard similarity {j}"
+        // );
         // Distance 0 is computed as -log(1) and becomes -0.0.
         // This maximum fixes that.
         mash_dist.max(0.0)
@@ -267,19 +269,25 @@ impl BucketSketch {
                 / (a.len() - both_empty) as f32;
         // Correction for accidental matches.
         let bb = (1usize << (size_of::<T>() * 8)) as f32;
-        (bb * f - 1.0) / (bb - 1.0)
-        // f
+
+        // Correction for accidental matches.
+        // Take a max with 0 to avoid correcting into a negative jaccard similarity
+        // for uncorrelated sketches.
+        (bb * f - 1.0).max(0.0) / (bb - 1.0)
     }
 
     fn b1_similarity(a: &Vec<u64>, b: &Vec<u64>, both_empty: usize) -> f32 {
         assert_eq!(a.len(), b.len());
-        let f = std::iter::zip(a, b)
-            .map(|(a, b)| (*a ^ *b).count_zeros())
-            .sum::<u32>() as f32
-            / (64 * a.len() - both_empty) as f32;
+        let f = 1.0
+            - std::iter::zip(a, b)
+                .map(|(a, b)| (*a ^ *b).count_ones())
+                .sum::<u32>() as f32
+                / (64 * a.len() - both_empty) as f32;
 
         // Correction for accidental matches.
-        2. * f - 1.
+        // Take a max with 0 to avoid correcting into a negative jaccard similarity
+        // for uncorrelated sketches.
+        (2. * f - 1.).max(0.0)
     }
 
     fn both_empty(&self, other: &Self) -> usize {
