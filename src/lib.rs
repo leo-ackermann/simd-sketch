@@ -154,7 +154,18 @@ impl Sketch {
             Sketch::BucketSketch(sketch) => sketch.k,
         };
         // See eq. 4 of mash paper.
-        -(2. * j / (1. + j)).ln() / k as f32
+        let mash_dist = -(2. * j / (1. + j)).ln() / k as f32;
+        assert!(
+            mash_dist >= 0.0,
+            "Bad mash distance {mash_dist} for jaccard similarity {j}"
+        );
+        assert!(
+            mash_dist <= 1.0,
+            "Bad mash distance {mash_dist} for jaccard similarity {j}"
+        );
+        // Distance 0 is computed as -log(1) and becomes -0.0.
+        // This maximum fixes that.
+        mash_dist.max(0.0)
     }
 }
 
