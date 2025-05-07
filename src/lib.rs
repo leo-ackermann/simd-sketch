@@ -600,7 +600,6 @@ mod test {
         for k in (0..10).map(|_| rand::random_range(1..100)) {
             for n in (0..10).map(|_| rand::random_range(k..1000)) {
                 for s in (0..10).map(|_| rand::random_range(0..n - k + 1)) {
-                    eprintln!("{k} {n} {s}");
                     let seq = packed_seq::AsciiSeqVec::random(n);
                     let sketcher = crate::SketchParams {
                         alg: SketchAlg::Bottom,
@@ -625,6 +624,64 @@ mod test {
 
                     let bottom_rc = sketcher.bottom_sketch(&[seq_rc.as_slice()]).bottom;
                     assert_eq!(bottom, bottom_rc);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn equal_dist() {
+        let s = 1000;
+        let k = 10;
+        let n = 300;
+        let b = 8;
+        let seq = packed_seq::AsciiSeqVec::random(n);
+
+        for (alg, filter_empty) in [
+            (SketchAlg::Bottom, false),
+            (SketchAlg::Bucket, false),
+            (SketchAlg::Bucket, true),
+        ] {
+            let sketcher = crate::SketchParams {
+                alg,
+                rc: false,
+                k,
+                s,
+                b,
+                filter_empty,
+            }
+            .build();
+            let sketch = sketcher.sketch(seq.as_slice());
+            assert_eq!(sketch.mash_dist(&sketch), 0.0);
+        }
+    }
+
+    #[test]
+    fn fuzz_short() {
+        let s = 1024;
+        let k = 10;
+        for b in [1, 8, 16, 32] {
+            for n in [10, 20, 40, 80, 150, 300, 500, 1000, 2000] {
+                let seq1 = packed_seq::AsciiSeqVec::random(n);
+                let seq2 = packed_seq::AsciiSeqVec::random(n);
+
+                for (alg, filter_empty) in [
+                    (SketchAlg::Bottom, false),
+                    (SketchAlg::Bucket, false),
+                    (SketchAlg::Bucket, true),
+                ] {
+                    let sketcher = crate::SketchParams {
+                        alg,
+                        rc: false,
+                        k,
+                        s,
+                        b,
+                        filter_empty,
+                    }
+                    .build();
+                    let s1 = sketcher.sketch(seq1.as_slice());
+                    let s2 = sketcher.sketch(seq2.as_slice());
+                    s1.mash_dist(&s2);
                 }
             }
         }
