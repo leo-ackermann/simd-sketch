@@ -100,7 +100,7 @@ fn main() {
         .progress_with_style(style.clone())
         .with_message("Distances")
         .with_finish(indicatif::ProgressFinish::AndLeave)
-        .map(|(i, j)| sketches[i].mash_dist(&sketches[j]))
+        .map(|(i, j)| sketches[i].mash_distance(&sketches[j]))
         .collect();
     let t_dist = start.elapsed();
 

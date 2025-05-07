@@ -64,34 +64,30 @@
 //! ```
 //! use packed_seq::SeqVec;
 //!
-//! let k = 31;   // Hash all k-mers.
-//! let s = 8192; // Sample 8192 hashes
-//! let b = 8;    // Store the bottom 8 bits of each hash.
-//!
-//! // Use `new_rc` for a canonical (reverse-complement-aware) hash.
-//! // `new_fwd` uses a plain forward hash instead.
-//! let sketcher = simd_sketch::Sketcher::new_rc(k, s, b);
+//! let sketcher = simd_sketch::SketchParams {
+//!     alg: simd_sketch::SketchAlg::Bucket,
+//!     rc: false,  // Set to `true` for a canonical (reverse-complement-aware) hash.
+//!     k: 31,      // Hash 31-mers
+//!     s: 8192,    // Sample 8192 hashes
+//!     b: 8,       // Store the bottom 8 bits of each hash.
+//!     filter_empty: true, // Explicitly filter out empty buckets for BucketSketch.
+//! }.build();
 //!
 //! // Generate two random sequences of 2M characters.
 //! let n = 2_000_000;
 //! let seq1 = packed_seq::PackedSeqVec::random(n);
 //! let seq2 = packed_seq::PackedSeqVec::random(n);
 //!
-//! // Bottom-sketch variant
-//!
-//! let sketch1: simd_sketch::BottomSketch = sketcher.bottom_sketch(seq1.as_slice());
-//! let sketch2: simd_sketch::BottomSketch = sketcher.bottom_sketch(seq2.as_slice());
-//!
-//! // Value between 0 and 1, estimating the fraction of shared k-mers.
-//! let similarity = sketch1.similarity(&sketch2);
-//!
-//! // Bucket sketch variant
-//!
-//! let sketch1: simd_sketch::BucketSketch = sketcher.sketch(seq1.as_slice());
-//! let sketch2: simd_sketch::BucketSketch = sketcher.sketch(seq2.as_slice());
+//! // Sketch using given algorithm:
+//! let sketch1: simd_sketch::Sketch = sketcher.sketch(seq1.as_slice());
+//! let sketch2: simd_sketch::Sketch = sketcher.sketch(seq2.as_slice());
 //!
 //! // Value between 0 and 1, estimating the fraction of shared k-mers.
-//! let similarity: f32 = sketch1.similarity(&sketch2);
+//! let j = sketch1.jaccard_similarity(&sketch2);
+//! assert!(0.0 <= j && j <= 1.0);
+//!
+//! let d = sketch1.mash_distance(&sketch2);
+//! assert!(0.0 <= d);
 //! ```
 //!
 //! **TODO:** Currently there is no support yet for merging sketches, or for
@@ -148,35 +144,39 @@ pub enum Sketch {
     BucketSketch(BucketSketch),
 }
 
+fn compute_mash_distance(j: f32, k: usize) -> f32 {
+    assert!(j >= 0.0, "Jaccard similarity {j} should not be negative");
+    // See eq. 4 of mash paper.
+    let mash_dist = -(2. * j / (1. + j)).ln() / k as f32;
+    assert!(
+        mash_dist >= 0.0,
+        "Bad mash distance {mash_dist} for jaccard similarity {j}"
+    );
+    // NOTE: Mash distance can be >1 when jaccard similarity is close to 0.
+    // assert!(
+    //     mash_dist <= 1.0,
+    //     "Bad mash distance {mash_dist} for jaccard similarity {j}"
+    // );
+    // Distance 0 is computed as -log(1) and becomes -0.0.
+    // This maximum fixes that.
+    mash_dist.max(0.0)
+}
+
 impl Sketch {
     pub fn jaccard_similarity(&self, other: &Self) -> f32 {
         match (self, other) {
-            (Sketch::BottomSketch(a), Sketch::BottomSketch(b)) => a.similarity(b),
-            (Sketch::BucketSketch(a), Sketch::BucketSketch(b)) => a.similarity(b),
+            (Sketch::BottomSketch(a), Sketch::BottomSketch(b)) => a.jaccard_similarity(b),
+            (Sketch::BucketSketch(a), Sketch::BucketSketch(b)) => a.jaccard_similarity(b),
             _ => panic!("Sketches are of different types!"),
         }
     }
-    pub fn mash_dist(&self, other: &Self) -> f32 {
+    pub fn mash_distance(&self, other: &Self) -> f32 {
         let j = self.jaccard_similarity(other);
-        assert!(j >= 0.0, "Jaccard similarity {j} should not be negative");
         let k = match self {
             Sketch::BottomSketch(sketch) => sketch.k,
             Sketch::BucketSketch(sketch) => sketch.k,
         };
-        // See eq. 4 of mash paper.
-        let mash_dist = -(2. * j / (1. + j)).ln() / k as f32;
-        assert!(
-            mash_dist >= 0.0,
-            "Bad mash distance {mash_dist} for jaccard similarity {j}"
-        );
-        // NOTE: Mash distance can be >1 when jaccard similarity is close to 0.
-        // assert!(
-        //     mash_dist <= 1.0,
-        //     "Bad mash distance {mash_dist} for jaccard similarity {j}"
-        // );
-        // Distance 0 is computed as -log(1) and becomes -0.0.
-        // This maximum fixes that.
-        mash_dist.max(0.0)
+        compute_mash_distance(j, k)
     }
 }
 
@@ -218,7 +218,7 @@ pub struct BottomSketch {
 
 impl BottomSketch {
     /// Compute the similarity between two `BottomSketch`es.
-    pub fn similarity(&self, other: &Self) -> f32 {
+    pub fn jaccard_similarity(&self, other: &Self) -> f32 {
         assert_eq!(self.rc, other.rc);
         assert_eq!(self.k, other.k);
         let a = &self.bottom;
@@ -239,6 +239,11 @@ impl BottomSketch {
 
         return intersection_size as f32 / a.len() as f32;
     }
+
+    pub fn mash_distance(&self, other: &Self) -> f32 {
+        let j = self.jaccard_similarity(other);
+        compute_mash_distance(j, self.k)
+    }
 }
 
 /// A sketch containing the smallest k-mer hash for each remainder mod `s`.
@@ -253,7 +258,7 @@ pub struct BucketSketch {
 
 impl BucketSketch {
     /// Compute the similarity between two `BucketSketch`es.
-    pub fn similarity(&self, other: &Self) -> f32 {
+    pub fn jaccard_similarity(&self, other: &Self) -> f32 {
         assert_eq!(self.rc, other.rc);
         assert_eq!(self.k, other.k);
         assert_eq!(self.b, other.b);
@@ -269,6 +274,12 @@ impl BucketSketch {
             _ => panic!("Bit width mismatch"),
         }
     }
+
+    pub fn mash_distance(&self, other: &Self) -> f32 {
+        let j = self.jaccard_similarity(other);
+        compute_mash_distance(j, self.k)
+    }
+
     fn inner_similarity<T: Eq>(a: &Vec<T>, b: &Vec<T>, both_empty: usize) -> f32 {
         assert_eq!(a.len(), b.len());
         let f = 1.0
@@ -669,7 +680,7 @@ mod test {
             }
             .build();
             let sketch = sketcher.sketch(seq.as_slice());
-            assert_eq!(sketch.mash_dist(&sketch), 0.0);
+            assert_eq!(sketch.mash_distance(&sketch), 0.0);
         }
     }
 
@@ -698,7 +709,7 @@ mod test {
                     .build();
                     let s1 = sketcher.sketch(seq1.as_slice());
                     let s2 = sketcher.sketch(seq2.as_slice());
-                    s1.mash_dist(&s2);
+                    s1.mash_distance(&s2);
                 }
             }
         }
