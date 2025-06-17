@@ -675,6 +675,7 @@ dependencies = [
  "packed-seq",
  "rand",
  "rayon",
+ "regex",
  "simd-minimizers",
  "wide",
 ]

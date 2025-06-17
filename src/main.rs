@@ -4,8 +4,9 @@ use clap::Parser;
 use indicatif::ParallelProgressIterator;
 use itertools::Itertools;
 use log::info;
-use packed_seq::{PackedSeqVec, SeqVec};
+use packed_seq::{AsciiSeqVec, SeqVec};
 use rayon::iter::{IntoParallelIterator, IntoParallelRefIterator, ParallelIterator};
+use regex::bytes::RegexBuilder;
 use simd_sketch::SketchParams;
 
 /// Compute the sketch distance between two fasta files.
@@ -74,7 +75,17 @@ fn main() {
             let mut seqs = vec![];
             let mut reader = needletail::parse_fastx_file(&path).unwrap();
             while let Some(r) = reader.next() {
-                seqs.push(PackedSeqVec::from_ascii(&r.unwrap().seq()));
+                let seq: &[u8] = &r.unwrap().seq().into_owned();
+                let re = RegexBuilder::new(r"[N]+")
+                    .case_insensitive(true)
+                    .unicode(false)
+                    .build()
+                    .unwrap();
+                let subseqs_without_n: Vec<&[u8]> = re.split(seq).collect();
+
+                for swn in subseqs_without_n {
+                    seqs.push(AsciiSeqVec::from_ascii(swn));
+                }
             }
             let slices = seqs.iter().map(|s| s.as_slice()).collect_vec();
             sketcher.sketch_seqs(&slices)

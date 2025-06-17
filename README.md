@@ -1,3 +1,10 @@
+This fork uses a suboptimal way to handle 'N' nucleotides exactly as in Mash (ignore all k-mers that contain 'N').
+It can be seen as a x6/x7 implementation of Mash :zap:
+
+To use bottom-sketch, as in Mash, the `--alg bottom` flag is needed!
+
+----- 
+
 # SimdSketch
 
 [![crates.io](https://img.shields.io/crates/v/simd-sketch.svg)](https://crates.io/crates/simd-sketch)
